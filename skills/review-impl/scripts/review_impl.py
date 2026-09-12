@@ -57,6 +57,10 @@ def run(repo, plan, base, head, author, context=None, session=None, state_root=N
     plan_bytes = plan.read_bytes()
     snapshot = artefacts / "approved-plan.md"
     snapshot.write_bytes(plan_bytes)
+    context_snapshot = None
+    if context is not None:
+        context_snapshot = artefacts / "author-context.md"
+        context_snapshot.write_bytes(context.read_bytes())
     diff_path = artefacts / "implementation.diff"
     diff_path.write_bytes(diff)
     scope = {"repo": str(repo), "base": base_sha, "merge_base": merge_base,
@@ -66,7 +70,7 @@ def run(repo, plan, base, head, author, context=None, session=None, state_root=N
     scope_path = artefacts / "scope.json"
     scope_path.write_text(json.dumps(scope, indent=2) + "\n")
     try:
-        verdict, feedback, reviewer_session = run_review(reviewer, repo, snapshot, scope_path, context, session)
+        verdict, feedback, reviewer_session = run_review(reviewer, repo, snapshot, scope_path, context_snapshot, session)
         assert_checkout(repo, head_sha)
         if plan.read_bytes() != plan_bytes:
             raise RuntimeError("Approved plan changed during review; result is stale.")

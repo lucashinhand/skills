@@ -50,6 +50,19 @@ class ImplementationReviewTests(unittest.TestCase):
             self.assertEqual(self.calls[-1][1].read_bytes(), self.plan.read_bytes())
             self.assertIn('+def greet(name="world"):', Path(result["diff"]).read_text())
 
+    def test_external_context_is_snapshotted_beside_readable_plan_and_scope(self):
+        context = self.root / "external-context.md"
+        context.write_bytes("Author clarification: café\n".encode("utf-8"))
+        for author in ("codex", "claude"):
+            result = self.run_review(author, context=context)
+            supplied = self.calls[-1][3]
+            self.assertNotEqual(supplied, context)
+            self.assertEqual(supplied.parent, self.calls[-1][1].parent)
+            self.assertEqual(supplied.parent, Path(result["artefacts"]))
+            self.assertEqual(supplied.read_bytes(), context.read_bytes())
+        self.run_review()
+        self.assertIsNone(self.calls[-1][3])
+
     def test_untracked_work_is_not_silently_omitted(self):
         (self.repo / "extra.py").write_text("extra = True\n")
         with self.assertRaisesRegex(RuntimeError, "clean checkout"):
