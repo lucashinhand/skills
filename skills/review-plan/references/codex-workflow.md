@@ -1,8 +1,14 @@
 # Codex plan export and review
 
 The repo-local Stop hook runs scripts/plan_workflow.py hook using Python 3.
-It persists complete native Plan Mode proposals to .agents/plans/<title>-<session-key>.md.
-One active plan per Codex session; revisions retain the same absolute path.
+It persists complete native Plan Mode proposals to .agents/plans/<slug>.md.
+Every proposal includes one <!-- plan-slug: descriptive-unique-slug --> marker.
+Keep that marker across revisions, title changes and context replies. A genuinely
+different plan gets a new unique slug, independently of /pickup or author session.
+Review state is keyed by repository and slug, so revisions reuse the reviewer and
+three-pass budget even when the author session changes. Do not change the slug
+to evade the review limit. Slugs use lowercase letters, digits and single hyphens,
+at most 80 characters. Missing or ambiguous markers pause visibly.
 The hook owns all writes and reviewer bookkeeping; the planning agent remains read-only.
 
 The hook invokes the subscription-authenticated Claude CLI (claude-opus-5, low)

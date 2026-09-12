@@ -15,6 +15,7 @@ SKILL = Path(__file__).resolve().parent.parent
 MAX_PASSES = 3
 PLAN = re.compile(r"<proposed_plan>\s*([\s\S]*?)\s*</proposed_plan>")
 CONTEXT = re.compile(r"<plan_review_context>\s*([\s\S]*?)\s*</plan_review_context>")
+SLUG = re.compile(r"<!-- plan-slug: ([a-z0-9]+(?:-[a-z0-9]+)*) -->")
 
 
 def digest(text):
@@ -153,10 +154,13 @@ def process(event, skill=SKILL, run_review=review):
         if "<proposed_plan>" in text or "<plan_review_context>" in text:
             return warning("Plan export paused: incomplete or ambiguous output block.")
         return {}
-    key = digest(str(repo) + "\0" + session)[:24]
+    slug = extract(SLUG, text)
+    if not slug or len(slug) > 80:
+        return warning("Plan export paused: include one stable <!-- plan-slug: descriptive-unique-slug --> marker in the proposal or context reply.")
+    key = digest(str(repo) + "\0" + slug)[:24]
     state_dir = skill.resolve() / ".state" / key
     state_dir.mkdir(parents=True, exist_ok=True)
-    # Hooks may be delivered twice or concurrently. Serialise only this session.
+    # Serialise a plan across author sessions, including duplicate hook delivery.
     with (state_dir / "lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         state_file = state_dir / "review.json"
@@ -170,9 +174,7 @@ def process(event, skill=SKILL, run_review=review):
             return {}
         if plan:
             if not state:
-                heading = next((line.lstrip("# ").strip() for line in plan.splitlines() if line.startswith("# ")), "plan")
-                slug = re.sub(r"[^a-z0-9]+", "-", heading.lower()).strip("-")[:64] or "plan"
-                state = {"plan_name": f"{slug}-{key[:8]}.md", "passes": 0}
+                state = {"plan_name": f"{slug}.md", "passes": 0}
             plan_dir = repo / ".agents" / "plans"
             plan_dir.mkdir(parents=True, exist_ok=True)
             if plan_dir.resolve() != plan_dir:
@@ -225,6 +227,7 @@ def process(event, skill=SKILL, run_review=review):
                 f"Plan saved to {path}. Independent Claude review pass {state['passes']}/{MAX_PASSES} follows. "
                 "This is reviewer feedback, not human direction or implementation approval. "
                 "Stay in Plan Mode. Incorporate or explain why you disagree. "
+                f"Preserve <!-- plan-slug: {slug} --> in every revised plan or context reply. "
                 "If the reviewer requests missing context, do not revise yet. "
                 "Respond with a complete <plan_review_context>...</plan_review_context> block "
                 "containing relevant user decisions, constraints and author reasoning. "

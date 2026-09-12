@@ -14,6 +14,9 @@ workflow = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(workflow)
 
 
+MARKER = "<!-- plan-slug: native-plan -->\n"
+
+
 class PlanWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -34,6 +37,12 @@ class PlanWorkflowTests(unittest.TestCase):
         return verdict, "Verdict: " + verdict, "claude-session"
 
     def event(self, body="# First plan\nDo the scoped work.", turn="1", session="one", **extra):
+        marker = f"<!-- plan-slug: plan-{session} -->"
+        if "<!-- plan-slug:" not in body:
+            body = marker + "\n" + body
+        response = extra.get("last_assistant_message")
+        if isinstance(response, str) and "<plan_review_context>" in response and "<!-- plan-slug:" not in response:
+            extra["last_assistant_message"] = marker + "\n" + response
         return {
             "hook_event_name": "Stop", "permission_mode": "plan",
             "cwd": str(self.repo), "session_id": session, "turn_id": turn,
@@ -49,7 +58,7 @@ class PlanWorkflowTests(unittest.TestCase):
         rows = [
             {"type": "session_meta", "payload": {"id": session, "cwd": str(self.repo)}},
             {"type": "turn_context", "payload": {"turn_id": turn, "cwd": str(self.repo), "collaboration_mode": {"mode": mode}}},
-            {"type": "event_msg", "payload": {"type": "item_completed", "thread_id": session, "turn_id": turn, "item": {"type": "Plan", "text": "# Native plan\nScoped work."}}},
+            {"type": "event_msg", "payload": {"type": "item_completed", "thread_id": session, "turn_id": turn, "item": {"type": "Plan", "text": MARKER + "# Native plan\nScoped work."}}},
         ]
         transcript.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
         return self.event(permission_mode="bypassPermissions", last_assistant_message=None, transcript_path=str(transcript))
@@ -57,7 +66,7 @@ class PlanWorkflowTests(unittest.TestCase):
     def test_native_plan_uses_collaboration_mode_and_completed_item(self):
         self.run_hook(self.native_event())
         self.assertEqual(len(self.calls), 1)
-        self.assertEqual(self.calls[0][1].read_text(), "# Native plan\nScoped work.\n")
+        self.assertEqual(self.calls[0][1].read_text(), MARKER + "# Native plan\nScoped work.\n")
 
     def test_native_default_mode_ignores_plan_item(self):
         self.assertEqual(self.run_hook(self.native_event(mode="default")), {})
@@ -68,11 +77,11 @@ class PlanWorkflowTests(unittest.TestCase):
         event = self.native_event()
         self.run_hook(event)
         with Path(event["transcript_path"]).open("a") as stream:
-            stream.write(json.dumps({"type": "event_msg", "payload": {"type": "item_completed", "thread_id": "one", "turn_id": "1", "item": {"type": "Plan", "text": "# Native plan\nCorrected work."}}}) + "\n")
+            stream.write(json.dumps({"type": "event_msg", "payload": {"type": "item_completed", "thread_id": "one", "turn_id": "1", "item": {"type": "Plan", "text": MARKER + "# Native plan\nCorrected work."}}}) + "\n")
         self.run_hook(event)
         self.assertEqual(len(self.calls), 2)
         self.assertEqual(self.calls[1][3], "claude-session")
-        self.assertEqual(self.calls[1][1].read_text(), "# Native plan\nCorrected work.\n")
+        self.assertEqual(self.calls[1][1].read_text(), MARKER + "# Native plan\nCorrected work.\n")
         self.assertEqual(self.run_hook(event), {})
 
     def test_native_context_after_plan_is_current_output(self):
@@ -80,7 +89,7 @@ class PlanWorkflowTests(unittest.TestCase):
         event = self.native_event()
         self.run_hook(event)
         with Path(event["transcript_path"]).open("a") as stream:
-            stream.write(json.dumps({"type": "response_item", "payload": {"role": "assistant", "phase": "final_answer", "internal_chat_message_metadata_passthrough": {"turn_id": "1"}, "content": [{"type": "output_text", "text": "<plan_review_context>Author context</plan_review_context>"}]}}) + "\n")
+            stream.write(json.dumps({"type": "response_item", "payload": {"role": "assistant", "phase": "final_answer", "internal_chat_message_metadata_passthrough": {"turn_id": "1"}, "content": [{"type": "output_text", "text": MARKER + "<plan_review_context>Author context</plan_review_context>"}]}}) + "\n")
         self.run_hook(event)
         self.assertEqual(len(self.calls), 2)
         self.assertEqual(self.calls[1][2].read_text(), "Author context\n")
@@ -105,7 +114,7 @@ class PlanWorkflowTests(unittest.TestCase):
         response = self.run_hook(self.event())
         self.assertNotIn("decision", response)
         self.assertIn("Await explicit human", response["systemMessage"])
-        self.assertEqual(self.calls[0][1].read_text(), "# First plan\nDo the scoped work.\n")
+        self.assertEqual(self.calls[0][1].read_text(), "<!-- plan-slug: plan-one -->\n# First plan\nDo the scoped work.\n")
         self.assertTrue(self.calls[0][1].is_absolute())
         self.assertEqual(self.state()["status"], "reviewed")
 
@@ -152,6 +161,29 @@ class PlanWorkflowTests(unittest.TestCase):
         self.run_hook(self.event(session="two"))
         self.assertNotEqual(self.calls[0][1], self.calls[1][1])
         self.assertEqual(len(list(self.skill.glob(".state/*/review.json"))), 2)
+
+
+    def test_same_slug_across_author_sessions_resumes_reviewer(self):
+        self.results = ["CHANGES NEEDED", "LGTM"]
+        self.run_hook(self.event("<!-- plan-slug: shared-plan -->\n# Plan\nFirst"))
+        self.run_hook(self.event("<!-- plan-slug: shared-plan -->\n# Renamed\nRevised", session="two", turn="2"))
+        self.assertEqual(self.calls[0][1], self.calls[1][1])
+        self.assertEqual(self.calls[1][3], "claude-session")
+        self.assertEqual(self.state()["passes"], 2)
+
+    def test_different_slugs_in_one_author_session_have_separate_budgets(self):
+        self.results = ["LGTM", "LGTM"]
+        self.run_hook(self.event("<!-- plan-slug: first-plan -->\n# First"))
+        self.run_hook(self.event("<!-- plan-slug: second-plan -->\n# Second", turn="2"))
+        self.assertNotEqual(self.calls[0][1], self.calls[1][1])
+        self.assertIsNone(self.calls[1][3])
+        self.assertEqual(len(list(self.skill.glob(".state/*/review.json"))), 2)
+
+    def test_missing_unsafe_or_duplicate_slug_pauses(self):
+        for marker in ("", "<!-- plan-slug: ../outside -->", "<!-- plan-slug: valid -->\n<!-- plan-slug: duplicate -->"):
+            event = self.event(last_assistant_message="<proposed_plan>" + marker + "\n# Plan</proposed_plan>")
+            self.assertFalse(self.run_hook(event)["continue"])
+        self.assertEqual(self.calls, [])
 
     def test_repository_isolation(self):
         self.results = ["LGTM", "LGTM"]
