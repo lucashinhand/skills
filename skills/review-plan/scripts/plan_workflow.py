@@ -93,10 +93,43 @@ def warning(message):
     return {"continue": False, "stopReason": message, "systemMessage": message}
 
 
+def native_output(event):
+    # Codex 0.154 stores collaboration mode and Plan items in the exact rollout.
+    # permission_mode describes permissions, not the collaboration mode.
+    with Path(event["transcript_path"]).open() as stream:
+        rows = [json.loads(line) for line in stream if line.strip()]
+    session, turn = event["session_id"], event["turn_id"]
+    repo = Path(event["cwd"]).resolve()
+    metadata = [row["payload"] for row in rows if row.get("type") == "session_meta"]
+    if len(metadata) != 1 or metadata[0].get("id") != session:
+        raise ValueError("Transcript session does not match hook session.")
+    contexts = [row["payload"] for row in rows if row.get("type") == "turn_context" and row.get("payload", {}).get("turn_id") == turn]
+    if not contexts or Path(contexts[-1].get("cwd", "")).resolve() != repo:
+        raise ValueError("Transcript turn or working directory does not match hook.")
+    mode = contexts[-1].get("collaboration_mode", {}).get("mode")
+    if mode not in ("plan", "default"):
+        raise ValueError("Transcript collaboration mode is unavailable.")
+    if mode != "plan":
+        return None
+    messages = []
+    for row in rows:
+        payload = row.get("payload", {})
+        if row.get("type") == "event_msg" and payload.get("type") == "item_completed" and payload.get("turn_id") == turn and payload.get("thread_id") == session:
+            item = payload.get("item", {})
+            if item.get("type") == "Plan":
+                messages.append("<proposed_plan>" + item["text"] + "</proposed_plan>")
+        if row.get("type") == "response_item" and payload.get("role") == "assistant" and payload.get("phase") == "final_answer" and payload.get("internal_chat_message_metadata_passthrough", {}).get("turn_id") == turn:
+            messages.append("".join(part.get("text", "") for part in payload.get("content", []) if part.get("type") == "output_text"))
+    # Hook continuations append revised snapshots within the same turn.
+    return messages[-1] if messages else ""
+
+
 def process(event, skill=SKILL, run_review=review):
-    if event.get("hook_event_name") != "Stop" or event.get("permission_mode") != "plan":
+    if event.get("hook_event_name") != "Stop":
         return {}
     if event.get("agent_id"):
+        return {}
+    if not event.get("transcript_path") and event.get("permission_mode") != "plan":
         return {}
     session = event.get("session_id")
     turn = event.get("turn_id")
@@ -105,6 +138,13 @@ def process(event, skill=SKILL, run_review=review):
         return warning("Plan export paused: missing session, turn or working directory.")
     repo = Path(cwd).resolve()
     text = event.get("last_assistant_message")
+    if event.get("transcript_path"):
+        try:
+            text = native_output(event)
+        except (OSError, ValueError, KeyError, TypeError):
+            return warning("Plan export paused: cannot verify this turn's transcript output.")
+        if text is None:
+            return {}
     if not isinstance(text, str):
         return warning("Plan export paused: this runtime did not supply assistant text.")
     plan = extract(PLAN, text)
@@ -121,7 +161,8 @@ def process(event, skill=SKILL, run_review=review):
         fcntl.flock(lock, fcntl.LOCK_EX)
         state_file = state_dir / "review.json"
         state = json.loads(state_file.read_text()) if state_file.exists() else {}
-        if state.get("last_turn") == turn:
+        output_hash = digest(text)
+        if state.get("last_turn") == turn and state.get("last_output_hash") == output_hash:
             return {}
         if state.get("status") in ("failed", "paused"):
             return warning(f"Plan review is {state['status']}; human intervention required. State: {state_file}")
@@ -152,6 +193,7 @@ def process(event, skill=SKILL, run_review=review):
             context_path = state_dir / "author-context.md"
             atomic_write(context_path, context + "\n")
         state["last_turn"] = turn
+        state["last_output_hash"] = output_hash
         if state["passes"] >= MAX_PASSES:
             state["status"] = "paused"
             atomic_write(state_file, json.dumps(state, indent=2) + "\n")

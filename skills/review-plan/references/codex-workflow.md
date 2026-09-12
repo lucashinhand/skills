@@ -26,7 +26,13 @@ current head; it is intentionally not implemented in this plumbing-only slice.
 Setup: install the skill using npx skills, register the repo-local Stop hook,
 then start a fresh Codex session and review/trust the exact hook in /hooks.
 Do not bypass hook trust. No user-level hook is required.
-The hook assumes Stop supplies complete assistant text; absent/malformed output
-produces a visible warning rather than guessing from unrelated session history.
+If installing into an already-running CLI, exit and resume that conversation
+before testing: an active/trusted entry in /hooks alone does not prove the
+running session dispatches it. Verify an actual plan export and reviewer result.
+For Codex 0.154, the hook reads the exact Stop transcript_path and verifies its
+session, turn, working directory and collaboration mode before exporting the
+completed Plan item. Permission mode is not collaboration mode. Transcript formats
+are version-sensitive; mismatches pause visibly, never search other sessions.
+Direct Plan Mode payloads with complete assistant text are also supported.
 
 TODO: supply an explicit setup command for repo hook wiring after the migration.

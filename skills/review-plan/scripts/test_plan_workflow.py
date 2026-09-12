@@ -44,6 +44,60 @@ class PlanWorkflowTests(unittest.TestCase):
     def run_hook(self, event):
         return workflow.process(event, self.skill, self.reviewer)
 
+    def native_event(self, mode="plan", session="one", turn="1"):
+        transcript = self.root / "rollout.jsonl"
+        rows = [
+            {"type": "session_meta", "payload": {"id": session, "cwd": str(self.repo)}},
+            {"type": "turn_context", "payload": {"turn_id": turn, "cwd": str(self.repo), "collaboration_mode": {"mode": mode}}},
+            {"type": "event_msg", "payload": {"type": "item_completed", "thread_id": session, "turn_id": turn, "item": {"type": "Plan", "text": "# Native plan\nScoped work."}}},
+        ]
+        transcript.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+        return self.event(permission_mode="bypassPermissions", last_assistant_message=None, transcript_path=str(transcript))
+
+    def test_native_plan_uses_collaboration_mode_and_completed_item(self):
+        self.run_hook(self.native_event())
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][1].read_text(), "# Native plan\nScoped work.\n")
+
+    def test_native_default_mode_ignores_plan_item(self):
+        self.assertEqual(self.run_hook(self.native_event(mode="default")), {})
+        self.assertEqual(self.calls, [])
+
+    def test_native_revision_within_same_turn_reaches_same_reviewer(self):
+        self.results = ["CHANGES NEEDED", "LGTM"]
+        event = self.native_event()
+        self.run_hook(event)
+        with Path(event["transcript_path"]).open("a") as stream:
+            stream.write(json.dumps({"type": "event_msg", "payload": {"type": "item_completed", "thread_id": "one", "turn_id": "1", "item": {"type": "Plan", "text": "# Native plan\nCorrected work."}}}) + "\n")
+        self.run_hook(event)
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(self.calls[1][3], "claude-session")
+        self.assertEqual(self.calls[1][1].read_text(), "# Native plan\nCorrected work.\n")
+        self.assertEqual(self.run_hook(event), {})
+
+    def test_native_context_after_plan_is_current_output(self):
+        self.results = ["CHANGES NEEDED", "LGTM"]
+        event = self.native_event()
+        self.run_hook(event)
+        with Path(event["transcript_path"]).open("a") as stream:
+            stream.write(json.dumps({"type": "response_item", "payload": {"role": "assistant", "phase": "final_answer", "internal_chat_message_metadata_passthrough": {"turn_id": "1"}, "content": [{"type": "output_text", "text": "<plan_review_context>Author context</plan_review_context>"}]}}) + "\n")
+        self.run_hook(event)
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(self.calls[1][2].read_text(), "Author context\n")
+
+    def test_native_wrong_session_or_turn_fails_closed(self):
+        for overrides in ({"session": "other"}, {"turn": "old"}):
+            self.assertFalse(self.run_hook(self.native_event(**overrides))["continue"])
+        self.assertEqual(self.calls, [])
+
+    def test_native_clarification_does_not_reuse_old_plan(self):
+        event = self.native_event()
+        transcript = Path(event["transcript_path"])
+        with transcript.open("a") as stream:
+            stream.write(json.dumps({"type": "turn_context", "payload": {"turn_id": "2", "cwd": str(self.repo), "collaboration_mode": {"mode": "plan"}}}) + "\n")
+        self.assertEqual(self.run_hook({**event, "turn_id": "2"}), {})
+        self.assertEqual(self.calls, [])
+
     def state(self):
         return json.loads(next(self.skill.glob(".state/*/review.json")).read_text())
 
