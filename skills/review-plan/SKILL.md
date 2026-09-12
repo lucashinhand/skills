@@ -121,11 +121,14 @@ Do not add a user-facing preface, closing note, sources section, review-process 
 
 ## Codex plan persistence
 
-Automatic plan proposals carry a stable `<!-- plan-slug: descriptive-unique-slug -->`
+Automatic Codex plan proposals carry a stable `<!-- plan-slug: descriptive-unique-slug -->`
 marker inside the proposal. Preserve it across revisions and title changes; include
 it in context replies too. A new plan gets a new slug, without any /pickup dependency.
 The hook exports `.agents/plans/<slug>.md`; its review session and pass budget belong
 to that repository/slug, not the author's CLI session. This marker is not required
 for ordinary standalone manual reviews of an existing supplied plan.
+Claude-authored plans instead use their exact native plan filename as identity;
+never require a marker or impose custom naming on Claude.
+For Claude hook setup and limits, read [references/claude-workflow.md](references/claude-workflow.md).
 
 When setting up or diagnosing automatic plan export and review, read [references/codex-workflow.md](references/codex-workflow.md). Ordinary standalone reviews use only the rubric above; never recursively launch a reviewer.

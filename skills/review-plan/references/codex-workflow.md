@@ -42,3 +42,25 @@ are version-sensitive; mismatches pause visibly, never search other sessions.
 Direct Plan Mode payloads with complete assistant text are also supported.
 
 TODO: supply an explicit setup command for repo hook wiring after the migration.
+
+## Codex reviewer transport
+
+`scripts/codex_review.py --repo <repo> --plan <absolute-plan-path>` runs an
+independent Codex Astra/low review through the ChatGPT subscription. Add
+`--resume <session-id>` for follow-ups and `--context <path>` for author context.
+It returns JSON containing verdict, feedback and session_id; errors exit nonzero
+with an error field. This adapter is not itself a plan-ready hook.
+
+The runner reapplies read-only sandboxing and never-approve on initial/resumed
+runs, ignores user configuration, disables hooks/apps/plugins, and replaces MCP
+configuration with an explicit GitHub read-tool allowlist (or no MCP without a
+PAT). It never includes credential values in command arguments.
+
+Codex 0.154's exec JSONL does not expose nested code-mode command outcomes. The
+adapter therefore verifies the exact reviewer transcript/session and current
+turn's cwd/sandbox, and refuses approval after failed tool results. This is
+conservative: nonzero command results require attention, even if the model later
+prints LGTM. Code mode remains enabled because this CLI requires it for tools.
+Transcript/schema mismatches fail visibly. Native initial and resumed reviews
+and a harmless sandbox-denied write have been tested; keep these checks when
+changing the adapter or CLI version.

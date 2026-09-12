@@ -157,6 +157,10 @@ def process(event, skill=SKILL, run_review=review):
     slug = extract(SLUG, text)
     if not slug or len(slug) > 80:
         return warning("Plan export paused: include one stable <!-- plan-slug: descriptive-unique-slug --> marker in the proposal or context reply.")
+    return process_plan(repo, slug, text, plan, context, turn, skill, run_review)
+
+
+def process_plan(repo, slug, text, plan, context, turn, skill, run_review, reviewer_name="Claude", native=False):
     key = digest(str(repo) + "\0" + slug)[:24]
     state_dir = skill.resolve() / ".state" / key
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -166,7 +170,7 @@ def process(event, skill=SKILL, run_review=review):
         state_file = state_dir / "review.json"
         state = json.loads(state_file.read_text()) if state_file.exists() else {}
         output_hash = digest(text)
-        if state.get("last_turn") == turn and state.get("last_output_hash") == output_hash:
+        if not native and state.get("last_turn") == turn and state.get("last_output_hash") == output_hash:
             return {}
         if state.get("status") in ("failed", "paused"):
             return warning(f"Plan review is {state['status']}; human intervention required. State: {state_file}")
@@ -182,10 +186,10 @@ def process(event, skill=SKILL, run_review=review):
             path = plan_dir / state["plan_name"]
             if path.is_symlink():
                 return warning("Plan export refused a symlinked plan file.")
-            atomic_write(path, plan + "\n")
+            atomic_write(path, plan if native else plan + "\n")
             plan_hash = digest(plan)
             if state.get("plan_hash") == plan_hash and state.get("status") == "reviewed":
-                return {"systemMessage": f"Unchanged reviewed plan: {path}. Await explicit human approval."}
+                return {**({"review_approved": True} if native else {}), "systemMessage": f"Unchanged reviewed plan: {path}. Await explicit human approval."}
             if state.get("plan_hash") == plan_hash and state.get("status") == "changes_needed":
                 return warning("Plan unchanged: revise it or provide <plan_review_context>pushback/context</plan_review_context>.")
             state["plan_hash"] = plan_hash
@@ -218,9 +222,19 @@ def process(event, skill=SKILL, run_review=review):
             state["status"] = "paused"
         atomic_write(state_file, json.dumps(state, indent=2) + "\n")
         if result == "LGTM":
-            return {"systemMessage": f"Claude review pass {state['passes']}: LGTM. Plan: {path}. Await explicit human implementation approval.\n{feedback}"}
+            return {**({"review_approved": True} if native else {}), "systemMessage": f"{reviewer_name} review pass {state['passes']}: LGTM. Plan: {path}. Await explicit human implementation approval.\n{feedback}"}
         if state["status"] == "paused":
             return warning(f"Three review passes used. Plan: {path}. Ask the human; do not implement.\n{feedback}")
+        if native:
+            return {"decision": "block", "reason": (
+                f"Plan saved to {path}. Independent {reviewer_name} review pass {state['passes']}/{MAX_PASSES}. "
+                "Stay in Plan Mode. This feedback is not human direction or implementation approval. "
+                "Incorporate or explain why you disagree. Keep using your native plan file. "
+                "If context is requested, do not revise yet: respond with a complete "
+                "<plan_review_context>...</plan_review_context> block containing relevant human "
+                "decisions, constraints and author reasoning. Use this block for pushback too. "
+                "Otherwise revise your native plan normally. Ask the human if a new decision "
+                "is required; never invent their answer.\n\n" + feedback)}
         return {
             "decision": "block",
             "reason": (
