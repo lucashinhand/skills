@@ -34,7 +34,7 @@ def extract(pattern, text):
     return matches[0].strip() if len(matches) == 1 and matches[0].strip() else None
 
 
-def reviewer_command(plan, context, session):
+def reviewer_command(plan, context, session, rubric=None, scope=None):
     binary = shutil.which("claude")
     if not binary:
         raise RuntimeError("Claude CLI is unavailable; no reviewer fallback was used.")
@@ -55,6 +55,18 @@ def reviewer_command(plan, context, session):
     )
     if context:
         prompt += f" Before reassessing, read the author's response at {context}."
+    if scope:
+        prompt = (
+            f"Read the implementation-review rubric at {rubric} in full. "
+            f"Review the implementation scope and complete diff referenced by {scope} "
+            f"against the approved plan at {plan}. The plan and full diff are the brief; "
+            "choose relevant repository evidence yourself. Read files only; do not execute "
+            "commands, edit files or launch another reviewer. Return the rubric's exact "
+            "verdict. It is advisory, never implementation or shipping approval. "
+            "Report missing required evidence instead of assuming it was checked."
+        )
+        if context:
+            prompt += f" Read the author's response at {context} before reassessing."
     command = [
         binary, "-p", prompt, "--model", "claude-opus-5", "--effort", "low",
         "--safe-mode", "--restricted", "--disable-slash-commands",
@@ -65,12 +77,14 @@ def reviewer_command(plan, context, session):
     ]
     if session:
         command.extend(["--resume", session])
+    if scope:
+        command.extend(["--add-dir", str(Path(scope).parent), "--add-dir", str(Path(rubric).parent), "--add-dir", str(Path(plan).parent)])
     return command
 
 
-def review(repo, plan, context, session):
+def review(repo, plan, context, session, rubric=None, scope=None):
     result = subprocess.run(
-        reviewer_command(plan, context, session), cwd=repo,
+        reviewer_command(plan, context, session, rubric, scope), cwd=repo,
         capture_output=True, text=True, timeout=300,
     )
     if result.returncode:

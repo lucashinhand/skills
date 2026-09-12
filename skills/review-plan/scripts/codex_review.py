@@ -90,8 +90,11 @@ def verify_transcript(session, repo, codex_home):
                 raise RuntimeError("Reviewer tool failed; human attention required.")
 
 
-def review(repo, plan, rubric, context=None, session=None):
+def review(repo, plan, rubric, context=None, session=None, scope=None):
     prompt = f"Read {rubric} in full and review the complete plan at {plan}. Read repository evidence only; do not implement or launch another reviewer. Return the rubric's exact verdict. If required context or a tool is unavailable, return CHANGES NEEDED and explain the blocker, never LGTM."
+    if scope:
+        prompt = f"Read the implementation-review rubric at {rubric} in full. Review the implementation scope and complete diff referenced by {scope} against the approved plan at {plan}. The plan and full diff are the brief; choose relevant repository evidence yourself. Read-only review: do not implement or launch another reviewer. Return the rubric's exact verdict. It is advisory, never implementation or shipping approval. Report missing required evidence instead of assuming it was checked."
+        prompt += " This is source inspection, matching the Claude reviewer: use file-reading commands, not project-code execution or tests. Do not use shell heredocs; they require temporary writes in this runtime."
     if context:
         prompt += f" Read the author's response at {context} before reassessing."
     args = command(repo, prompt, session)
