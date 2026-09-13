@@ -339,6 +339,8 @@ node -e '
     throw error;
   }
   process.on("exit", () => fs.rmdirSync(lock));
+  process.on("SIGINT", () => process.exit(130));
+  process.on("SIGTERM", () => process.exit(143));
   const s = load();
 
   switch (cmd) {
