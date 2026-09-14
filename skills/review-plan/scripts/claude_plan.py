@@ -55,15 +55,15 @@ def process(event, skill=workflow.SKILL, run_review=review):
     native_path = Path(filename)
     if native_path.suffix != ".md" or not native_path.stem:
         raise ValueError("Expected a native Markdown plan file.")
-    plan = native_path.read_text()
+    plan = native_path.read_bytes().decode("utf-8")
     if not plan.strip():
         raise ValueError("Native plan file is empty.")
     repo = Path(event["cwd"]).resolve()
-    if context and (repo / ".agents" / "plans" / native_path.name).read_text() != plan:
+    if context and (repo / ".agents" / "plans" / native_path.name).read_bytes() != plan.encode("utf-8"):
         raise ValueError("Native plan changed during a context-only reply; submit the revised plan for review.")
     result = workflow.process_plan(repo, native_path.stem, context or plan,
                                    None if context else plan, context, turn,
-                                   skill, run_review, reviewer_name="Codex", native=True)
+                                   skill, run_review, reviewer_name="Codex", native=True, native_path=native_path)
     approved = result.pop("review_approved", False)
     if kind == "Stop":
         return result

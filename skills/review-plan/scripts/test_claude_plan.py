@@ -48,7 +48,7 @@ class ClaudePlanTests(unittest.TestCase):
         self.plan.write_text("# Changed title\nCorrected scope.\n")
         second = self.run_hook({**self.event, "session_id": "another", "tool_use_id": "tool-2"})
         self.assertEqual(second["hookSpecificOutput"]["permissionDecision"], "ask")
-        self.assertEqual(self.calls[0][0], self.calls[1][0])
+        self.assertNotEqual(self.calls[0][0], self.calls[1][0])
         self.assertEqual(self.calls[1][2], "codex-reviewer")
 
     def test_duplicate_rejected_plan_cannot_bypass_gate(self):
@@ -67,6 +67,37 @@ class ClaudePlanTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.run_hook({**self.event, "tool_input": {"plan": "# inline"}})
         self.assertEqual(self.calls, [])
+
+    def test_native_bytes_are_not_normalised(self):
+        for data in (b"# Native\r\nScope", b"# Native\r\nScope\r\n"):
+            self.plan.write_bytes(data)
+            self.results = ["LGTM"]
+            self.run_hook()
+            exported = self.repo / ".agents/plans" / self.plan.name
+            self.assertEqual(exported.read_bytes(), data)
+            self.assertEqual(self.calls[-1][0].read_bytes(), data)
+
+    def test_native_source_changed_during_review_refuses_approval(self):
+        def reviewer(repo, snapshot, context, session):
+            self.plan.write_text("Changed during review")
+            return "LGTM", "Verdict: LGTM", "codex-reviewer"
+        result = claude_plan.process(self.event, self.skill, reviewer)
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("No current approval", result["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_legacy_native_crlf_approval_does_not_consume_a_pass(self):
+        self.plan.write_bytes(b"# Native\r\nScope")
+        self.run_hook()
+        state_file = next(self.skill.glob(".state/*/review.json"))
+        state = json.loads(state_file.read_text())
+        self.assertEqual(state["plan_hash"], claude_plan.workflow.digest("# Native\nScope"))
+        for key in ("schema_version", "submitted_plan_sha256", "approved_plan_sha256", "snapshot_path", "feedback_path"):
+            state.pop(key)
+        state_file.write_text(json.dumps(state))
+        result = self.run_hook()
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(json.loads(state_file.read_text())["passes"], 1)
 
     def test_error_containing_lgtm_is_not_approval(self):
         self.results = [RuntimeError("invalid LGTM")]

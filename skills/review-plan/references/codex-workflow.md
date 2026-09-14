@@ -16,13 +16,43 @@ with only Read, Glob and Grep, safe/restricted mode, no MCP and no project hooks
 This initial integration reviews local repository evidence only. If GitHub context
 is essential and absent from the plan, request it; never silently treat it as checked.
 
-CHANGES NEEDED continues the parent in Plan Mode; LGTM ends the loop and waits
-for explicit human implementation approval. Context requests and reasoned pushback
+CHANGES NEEDED continues the parent in Plan Mode; LGTM continues it once to report
+the result and evidence links, without another proposal or review, then waits
+for explicit human implementation approval. A normal status reply does not
+trigger the exporter. Context requests and reasoned pushback
 use a complete <plan_review_context>...</plan_review_context> response, without
 changing the plan. New human decisions must be asked, not invented. All reviewer
 responses count towards the three-pass limit. Errors and exhaustion stop, not retry.
 
 State and latest feedback live in the physical installed skill's .state/ directory.
+Each attempt also retains a unique pass directory containing the exact submitted
+plan bytes, optional author context, feedback and a timestamped review record.
+The reviewer reads that snapshot, and completion verifies it against the canonical
+file before accepting LGTM. Attempt directories remain distinct after authorised
+budget resets. The output links the plan, snapshot, feedback and state and names
+the actual reviewer/session; the author surfaces that result to the human.
+
+Schema version 2 records `submitted_plan_sha256` and `approved_plan_sha256` over
+saved bytes. `last_output_hash` remains the text hash for duplicate deliveries;
+legacy `plan_hash` retains its original extracted-text meaning. An unchanged
+legacy approval is historical/unverified and consumes no new pass. A revised
+proposal enters the normal bounded loop; do not reset budgets to migrate state.
+For explicit re-review of an unchanged legacy proposal, the human must authorise
+clearing its old reviewed status to require a fresh pass, retaining its counters
+and session. No manual review command or automatic migration is introduced.
+
+Codex exports extracted text with its existing final-newline convention. Native
+Claude exports copy the original bytes exactly, even CRLF or no final newline.
+Neither context continuations nor approval checks normalise native bytes.
+Missing/changed snapshots, feedback or plan bytes cannot reuse an approval.
+Before implementation, the author checks current bytes against the recorded
+approved hash and snapshot as well as obtaining human implementation approval.
+
+Before a file-backed invocation the author checks that its latest conversational
+proposal is saved. The reviewer itself cannot see unsaved author history. A
+behavioural check is: give the author a saved proposal A and a newer proposal B
+in conversation, then request review; it must report “Latest proposal is not
+saved” without launching a reviewer or changing files during read-only review.
 Reinstallation may wipe this disposable state. Paused/failed sessions require human
 attention; this initial slice provides no automatic reset or fallback.
 Plans remain available throughout implementation and PR review. The later ship
@@ -42,6 +72,14 @@ are version-sensitive; mismatches pause visibly, never search other sessions.
 Direct Plan Mode payloads with complete assistant text are also supported.
 
 TODO: supply an explicit setup command for repo hook wiring after the migration.
+
+Validation on 14 September 2026 replayed an actual Codex Stop transcript through
+the updated workflow with isolated state and a live Claude reviewer. The result
+was LGTM with matching canonical/snapshot hashes, session identity and evidence
+links. A separate live author-behaviour check refused an unsaved newer proposal
+without launching a reviewer. Unit tests cover the LGTM reporting continuation
+and its subsequent no-op status reply; visual rendering of the in-app progress
+indicator still needs confirmation on the next interactive plan submission.
 
 ## Codex reviewer transport
 

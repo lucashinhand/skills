@@ -15,6 +15,15 @@ Address the entire response directly to the coding assistant so the user can cop
 
 ## Resolve the Review Context
 
+For a file-backed review, the author agent first compares the latest complete
+proposal in its conversation with the canonical saved file. If they differ,
+report **Latest proposal is not saved** and return to the authorised export/save
+workflow. Do not write during read-only review. This check belongs to the author:
+a reviewer subprocess receiving only a path cannot inspect the author's history.
+When this skill is invoked in the author session to obtain independent review,
+use the configured opposite-model reviewer; do not substitute self-review.
+These instructions do not ask an already-running reviewer to launch another one.
+
 1. Resolve the repository from the supplied plan, explicit user request or current working directory; do not assume a particular project.
 2. Use another repository only when the user names it or the supplied material unmistakably concerns another repository. Do not spend time generalizing this choice unnecessarily.
 3. Read the latest plan plus prior review turns, assistant pushback, requested context, and human comments in the current conversation.
@@ -76,6 +85,26 @@ Treat follow-up plans, assistant explanations, assistant pushback, and human res
 - Do not move the goalposts. Return `Verdict: LGTM` as soon as no material blocker remains.
 
 ## Output Contract
+
+The verdict format below belongs to the reviewer. The author orchestrating an
+automatic review separately announces that save/review is pending, then reports
+the actual reviewer, pass count, verdict or failure and a brief findings summary
+with clickable plan, snapshot and feedback links from the saved evidence. The
+hook's progress indicator covers its blocking subprocess; do not claim streaming
+reviewer commentary. Before answering status questions, inspect the exact plan's
+state rather than inferring completion from conversation history.
+
+Only describe approval as current when the canonical file's byte-level SHA-256
+matches `approved_plan_sha256` and the recorded snapshot, with feedback present
+in schema-version-2 evidence. Repeat this check before implementation, which
+still requires explicit human approval. Old `plan_hash` and `last_output_hash`
+are text hashes, not approval evidence. Missing evidence is unverified; changed
+bytes are stale. Do not silently spend a review pass to upgrade legacy approval.
+
+Claude reviewer sessions run through the local CLI, not Claude cloud. Include
+the recorded session ID and link a native transcript only after verifying its
+path and identity. Standalone read-only verdicts must be identified as manual;
+they do not update persisted workflow approval.
 
 Begin every `CHANGES NEEDED` response with this exact text:
 

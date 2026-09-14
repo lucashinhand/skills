@@ -10,6 +10,8 @@ import re
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone
+from uuid import uuid4
 
 SKILL = Path(__file__).resolve().parent.parent
 MAX_PASSES = 3
@@ -25,7 +27,7 @@ def digest(text):
 def atomic_write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(text)
+    temporary.write_bytes(text if isinstance(text, bytes) else text.encode("utf-8"))
     temporary.replace(path)
 
 
@@ -46,6 +48,8 @@ def reviewer_command(plan, context, session, rubric=None, scope=None):
     if any(os.environ.get(key) for key in forbidden):
         raise RuntimeError("An API/provider auth override is set; subscription-only review paused.")
     prompt = (
+        "You are the independent reviewer subprocess in the automatic plan-review workflow. "
+        "The parent owns evidence persistence and user-facing status reporting. "
         f"Read the review rubric at {SKILL / 'SKILL.md'} in full. "
         f"Review the implementation plan at {plan}. "
         "The plan file is the current complete proposal. Inspect relevant repository files "
@@ -106,6 +110,44 @@ def review(repo, plan, context, session, rubric=None, scope=None):
 
 def warning(message):
     return {"continue": False, "stopReason": message, "systemMessage": message}
+
+
+def file_hash(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def evidence_matches(state, path, approved=False, native_path=None):
+    expected = state.get("approved_plan_sha256" if approved else "submitted_plan_sha256")
+    if state.get("schema_version") != 2 or not expected:
+        return False
+    try:
+        paths = [path, state["snapshot_path"]]
+        if native_path:
+            paths.append(native_path)
+        return all(file_hash(item) == expected for item in paths) and Path(state["feedback_path"]).is_file()
+    except (OSError, KeyError):
+        return False
+
+
+def evidence_message(state, path, state_file):
+    lines = [f"Plan: [{path.name}]({path})", f"State: [review.json]({state_file})"]
+    for key, label in (("snapshot_path", "Reviewed snapshot"), ("feedback_path", "Review output")):
+        if state.get(key) and Path(state[key]).is_file():
+            lines.append(f"{label}: [{Path(state[key]).name}]({state[key]})")
+    if state.get("submitted_plan_sha256"):
+        lines.append(f"SHA-256: {state['submitted_plan_sha256']}")
+    if state.get("reviewer_session"):
+        lines.append(f"Reviewer session: {state['reviewer_session']}")
+    return "\n".join(lines)
+
+
+def approved_response(message, native):
+    if native:
+        return {"review_approved": True, "systemMessage": message}
+    return {"decision": "block", "reason": (
+        message + "\nReport this completed review to the human with its verdict and evidence links. "
+        "Do not emit another proposal or launch another review. Await explicit human implementation approval."
+    )}
 
 
 def native_output(event):
@@ -174,7 +216,7 @@ def process(event, skill=SKILL, run_review=review):
     return process_plan(repo, slug, text, plan, context, turn, skill, run_review)
 
 
-def process_plan(repo, slug, text, plan, context, turn, skill, run_review, reviewer_name="Claude", native=False):
+def process_plan(repo, slug, text, plan, context, turn, skill, run_review, reviewer_name="Claude", native=False, native_path=None):
     key = digest(str(repo) + "\0" + slug)[:24]
     state_dir = skill.resolve() / ".state" / key
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -186,7 +228,7 @@ def process_plan(repo, slug, text, plan, context, turn, skill, run_review, revie
         output_hash = digest(text)
         if not native and state.get("last_turn") == turn and state.get("last_output_hash") == output_hash:
             return {}
-        if state.get("status") in ("failed", "paused"):
+        if state.get("status") in ("failed", "paused", "stale"):
             return warning(f"Plan review is {state['status']}; human intervention required. State: {state_file}")
         if context and state.get("status") != "changes_needed":
             return {}
@@ -200,18 +242,25 @@ def process_plan(repo, slug, text, plan, context, turn, skill, run_review, revie
             path = plan_dir / state["plan_name"]
             if path.is_symlink():
                 return warning("Plan export refused a symlinked plan file.")
-            atomic_write(path, plan if native else plan + "\n")
-            plan_hash = digest(plan)
+            exported = (plan if native else plan + "\n").encode("utf-8")
+            atomic_write(path, exported)
+            if path.read_bytes() != exported or (native_path and Path(native_path).read_bytes() != exported):
+                return warning(f"Plan export read-back mismatch: {path}. No review started.")
+            # Legacy Claude read_text() normalised newlines; retain that hash's
+            # meaning while the submitted/approved hashes cover exact bytes.
+            legacy_text = plan.replace("\r\n", "\n").replace("\r", "\n") if native else plan
+            plan_hash = digest(legacy_text)
             if state.get("plan_hash") == plan_hash and state.get("status") == "reviewed":
-                return {**({"review_approved": True} if native else {}), "systemMessage": f"Unchanged reviewed plan: {path}. Await explicit human approval."}
+                if not evidence_matches(state, path, approved=True, native_path=native_path):
+                    return warning(f"Historical/unverified approval; no pass consumed. Submit a revised proposal for review.\n{evidence_message(state, path, state_file)}")
+                return approved_response(f"Unchanged reviewed plan. Current file matches reviewed snapshot. Await explicit human approval.\n{evidence_message(state, path, state_file)}", native)
             if state.get("plan_hash") == plan_hash and state.get("status") == "changes_needed":
                 return warning("Plan unchanged: revise it or provide <plan_review_context>pushback/context</plan_review_context>.")
             state["plan_hash"] = plan_hash
         path = repo / ".agents" / "plans" / state["plan_name"]
+        if context and not evidence_matches(state, path, native_path=native_path):
+            return warning(f"Context review refused: proposal evidence is missing or stale. Submit the revised plan.\n{evidence_message(state, path, state_file)}")
         context_path = None
-        if context:
-            context_path = state_dir / "author-context.md"
-            atomic_write(context_path, context + "\n")
         state["last_turn"] = turn
         state["last_output_hash"] = output_hash
         if state["passes"] >= MAX_PASSES:
@@ -219,24 +268,63 @@ def process_plan(repo, slug, text, plan, context, turn, skill, run_review, revie
             atomic_write(state_file, json.dumps(state, indent=2) + "\n")
             return warning(f"Three review passes used. Plan: {path}. Ask the human; do not implement.")
         state["passes"] += 1
+        attempt_dir = state_dir / f"pass-{state['passes']}-{uuid4().hex}"
+        attempt_dir.mkdir()
+        snapshot = attempt_dir / "plan.md"
+        submitted = path.read_bytes()
+        with snapshot.open("xb") as stream:
+            stream.write(submitted)
+        if snapshot.read_bytes() != submitted:
+            return warning(f"Snapshot read-back mismatch: {snapshot}. No review started.")
+        if context:
+            context_path = attempt_dir / "author-context.md"
+            atomic_write(context_path, context + "\n")
+        state.pop("approved_plan_sha256", None)
+        state.update(schema_version=2, submitted_plan_sha256=hashlib.sha256(submitted).hexdigest(),
+                     snapshot_path=str(snapshot), feedback_path=str(attempt_dir / "review.md"))
+        attempt = {"plan_path": str(path), "snapshot_path": str(snapshot),
+                   "submitted_plan_sha256": state["submitted_plan_sha256"],
+                   "pass": state["passes"], "budget": len(state.get("budget_resets", [])) + 1,
+                   "reviewer": reviewer_name, "reviewer_session": state.get("reviewer_session"),
+                   "context_path": str(context_path) if context_path else None,
+                   "feedback_path": state["feedback_path"],
+                   "started_at": datetime.now(timezone.utc).isoformat(), "outcome": "reviewing"}
         state["status"] = "reviewing"
+        atomic_write(attempt_dir / "review.json", json.dumps(attempt, indent=2) + "\n")
         atomic_write(state_file, json.dumps(state, indent=2) + "\n")
         try:
             result, feedback, reviewer_session = run_review(
-                repo, path, context_path, state.get("reviewer_session")
+                repo, snapshot, context_path, state.get("reviewer_session")
             )
+            if state.get("reviewer_session") and reviewer_session != state["reviewer_session"]:
+                raise RuntimeError("Reviewer resumed a different session.")
         except (RuntimeError, subprocess.TimeoutExpired, OSError) as error:
             state["status"] = "failed"
+            attempt.update(outcome="failed", error=str(error), completed_at=datetime.now(timezone.utc).isoformat())
+            atomic_write(attempt_dir / "review.json", json.dumps(attempt, indent=2) + "\n")
             atomic_write(state_file, json.dumps(state, indent=2) + "\n")
-            return warning(f"Plan saved to {path}, but review failed: {error}. Do not implement.")
+            return warning(f"{reviewer_name} review pass {state['passes']}/{MAX_PASSES} failed: {error}. Do not implement.\n{evidence_message(state, path, state_file)}")
         state["reviewer_session"] = reviewer_session
+        atomic_write(Path(state["feedback_path"]), feedback + "\n")
+        attempt.update(verdict=result, reviewer_session=reviewer_session, completed_at=datetime.now(timezone.utc).isoformat())
+        if not evidence_matches(state, path, native_path=native_path):
+            state["status"] = "stale"
+            attempt["outcome"] = "stale"
+            atomic_write(attempt_dir / "review.json", json.dumps(attempt, indent=2) + "\n")
+            atomic_write(state_file, json.dumps(state, indent=2) + "\n")
+            return warning(f"{reviewer_name} returned {result}, but review input changed or disappeared. No current approval.\n{evidence_message(state, path, state_file)}")
         state["status"] = "reviewed" if result == "LGTM" else "changes_needed"
+        attempt["outcome"] = state["status"]
+        if result == "LGTM":
+            state["approved_plan_sha256"] = state["submitted_plan_sha256"]
+        atomic_write(attempt_dir / "review.json", json.dumps(attempt, indent=2) + "\n")
         atomic_write(state_dir / "latest-review.md", feedback + "\n")
         if result != "LGTM" and state["passes"] >= MAX_PASSES:
             state["status"] = "paused"
         atomic_write(state_file, json.dumps(state, indent=2) + "\n")
+        feedback = f"{feedback}\n\nCurrent file matches reviewed snapshot.\n{evidence_message(state, path, state_file)}"
         if result == "LGTM":
-            return {**({"review_approved": True} if native else {}), "systemMessage": f"{reviewer_name} review pass {state['passes']}: LGTM. Plan: {path}. Await explicit human implementation approval.\n{feedback}"}
+            return approved_response(f"{reviewer_name} review pass {state['passes']}/{MAX_PASSES}: LGTM. Plan: {path}. Await explicit human implementation approval.\n{feedback}", native)
         if state["status"] == "paused":
             return warning(f"Three review passes used. Plan: {path}. Ask the human; do not implement.\n{feedback}")
         if native:
