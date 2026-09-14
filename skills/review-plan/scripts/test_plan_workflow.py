@@ -112,11 +112,15 @@ class PlanWorkflowTests(unittest.TestCase):
 
     def test_export_absolute_path_and_lgtm(self):
         response = self.run_hook(self.event())
-        self.assertNotIn("decision", response)
-        self.assertIn("Await explicit human", response["systemMessage"])
+        self.assertEqual(response["decision"], "block")
+        self.assertIn("Report this completed review", response["reason"])
+        self.assertIn("Await explicit human", response["reason"])
         self.assertEqual(self.calls[0][1].read_text(), "<!-- plan-slug: plan-one -->\n# First plan\nDo the scoped work.\n")
         self.assertTrue(self.calls[0][1].is_absolute())
         self.assertEqual(self.state()["status"], "reviewed")
+        result = self.run_hook(self.event(turn="2", last_assistant_message="Claude returned LGTM; here are the evidence links."))
+        self.assertEqual(result, {})
+        self.assertEqual(len(self.calls), 1)
 
     def test_default_mode_does_not_write_or_review(self):
         self.assertEqual(self.run_hook(self.event(permission_mode="default")), {})
@@ -137,7 +141,7 @@ class PlanWorkflowTests(unittest.TestCase):
         first = self.run_hook(self.event())
         self.assertEqual(first["decision"], "block")
         self.run_hook(self.event("# New title\nRevised work.", turn="2", stop_hook_active=True))
-        self.assertEqual(self.calls[0][1], self.calls[1][1])
+        self.assertNotEqual(self.calls[0][1], self.calls[1][1])
         self.assertEqual(self.calls[1][3], "claude-session")
         self.assertIn("Revised work.", self.calls[1][1].read_text())
         self.assertEqual(self.state()["passes"], 2)
@@ -167,7 +171,7 @@ class PlanWorkflowTests(unittest.TestCase):
         self.results = ["CHANGES NEEDED", "LGTM"]
         self.run_hook(self.event("<!-- plan-slug: shared-plan -->\n# Plan\nFirst"))
         self.run_hook(self.event("<!-- plan-slug: shared-plan -->\n# Renamed\nRevised", session="two", turn="2"))
-        self.assertEqual(self.calls[0][1], self.calls[1][1])
+        self.assertNotEqual(self.calls[0][1], self.calls[1][1])
         self.assertEqual(self.calls[1][3], "claude-session")
         self.assertEqual(self.state()["passes"], 2)
 
@@ -272,6 +276,82 @@ class PlanWorkflowTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "subscription-only") as error:
                 workflow.reviewer_command(self.repo / "plan.md", None, None)
         self.assertNotIn("do-not-expose", str(error.exception))
+
+    def test_approval_hashes_exact_export_and_retains_per_pass_evidence(self):
+        self.results = ["CHANGES NEEDED", "LGTM"]
+        self.run_hook(self.event())
+        first = self.calls[0][1]
+        first_bytes = first.read_bytes()
+        self.run_hook(self.event("# Revision\nNew scope.", turn="2"))
+        state = self.state()
+        exported = self.repo / ".agents/plans" / state["plan_name"]
+        self.assertEqual(first.read_bytes(), first_bytes)
+        self.assertEqual(state["approved_plan_sha256"], workflow.file_hash(exported))
+        self.assertNotEqual(state["plan_hash"], state["approved_plan_sha256"])
+        self.assertTrue(workflow.evidence_matches(state, exported, approved=True))
+        self.assertEqual(len(list(self.skill.glob(".state/*/pass-*/review.json"))), 2)
+        exported.write_text("Changed after approval")
+        self.assertFalse(workflow.evidence_matches(state, exported, approved=True))
+
+    def test_changed_or_deleted_review_inputs_refuse_lgtm(self):
+        for target in ("canonical", "snapshot"):
+            for remove in (False, True):
+                with self.subTest(target=target, remove=remove):
+                    slug = f"{target}-{str(remove).lower()}"
+                    def reviewer(repo, snapshot, context, session):
+                        path = snapshot if target == "snapshot" else repo / ".agents/plans" / f"{slug}.md"
+                        if remove:
+                            path.unlink()
+                        else:
+                            path.write_text("Different proposal")
+                        return "LGTM", "Verdict: LGTM", "claude-session"
+                    event = self.event(f"<!-- plan-slug: {slug} -->\n# Scope")
+                    result = workflow.process(event, self.skill, reviewer)
+                    self.assertFalse(result["continue"])
+                    self.assertIn("No current approval", result["systemMessage"])
+                    record = next(p for p in self.skill.glob(".state/*/review.json")
+                                  if json.loads(p.read_text())["plan_name"] == f"{slug}.md")
+                    state = json.loads(record.read_text())
+                    self.assertEqual(state["status"], "stale")
+                    self.assertNotIn("approved_plan_sha256", state)
+                    self.assertTrue(Path(state["feedback_path"]).exists())
+
+    def test_legacy_approval_neither_approves_nor_consumes_pass(self):
+        self.run_hook(self.event())
+        state_file = next(self.skill.glob(".state/*/review.json"))
+        state = self.state()
+        for key in ("schema_version", "submitted_plan_sha256", "approved_plan_sha256", "snapshot_path", "feedback_path"):
+            state.pop(key)
+        state_file.write_text(json.dumps(state))
+        result = self.run_hook(self.event(turn="2"))
+        self.assertFalse(result["continue"])
+        self.assertIn("Historical/unverified", result["systemMessage"])
+        self.assertEqual(self.state()["passes"], 1)
+        self.assertEqual(len(self.calls), 1)
+        self.results = ["LGTM"]
+        self.run_hook(self.event("# Changed proposal", turn="3"))
+        self.assertEqual(self.state()["passes"], 2)
+        self.assertEqual(self.calls[1][3], "claude-session")
+
+    def test_missing_feedback_cannot_use_unchanged_approval(self):
+        self.run_hook(self.event())
+        Path(self.state()["feedback_path"]).unlink()
+        self.assertFalse(self.run_hook(self.event(turn="2"))["continue"])
+        self.assertEqual(len(self.calls), 1)
+
+    def test_budget_reset_preserves_attempts(self):
+        self.run_hook(self.event())
+        old_snapshot = self.calls[0][1]
+        state_file = next(self.skill.glob(".state/*/review.json"))
+        state = self.state()
+        state.update(passes=0, status="changes_needed", budget_resets=[{"authorisation": "test"}])
+        state_file.write_text(json.dumps(state))
+        self.results = ["LGTM"]
+        self.run_hook(self.event("# Revised after authorised reset", turn="2"))
+        self.assertNotEqual(old_snapshot, self.calls[1][1])
+        self.assertTrue(old_snapshot.exists())
+        record = json.loads((self.calls[1][1].parent / "review.json").read_text())
+        self.assertEqual((record["budget"], record["pass"]), (2, 1))
 
     def test_permission_denial_invalidates_reviewer_lgtm(self):
         payload = {"result": "Verdict: LGTM", "session_id": "x", "permission_denials": [{"tool_name": "Edit"}]}
