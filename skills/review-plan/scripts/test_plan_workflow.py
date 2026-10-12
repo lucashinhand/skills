@@ -266,8 +266,8 @@ class PlanWorkflowTests(unittest.TestCase):
         self.assertIn("--safe-mode", command)
         self.assertIn("--restricted", command)
         self.assertEqual(command[command.index("--tools") + 1], "Read,Glob,Grep")
-        self.assertEqual(command[command.index("--model") + 1], "claude-opus-5")
-        self.assertEqual(command[command.index("--effort") + 1], "low")
+        self.assertEqual(command[command.index("--model") + 1], "claude-opus-5-5")
+        self.assertEqual(command[command.index("--effort") + 1], "xhigh")
         self.assertNotIn("--bare", command)
         self.assertIn(str(self.repo / "plan.md"), command[2])
 

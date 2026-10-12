@@ -119,14 +119,12 @@ class ClaudePlanTests(unittest.TestCase):
         self.results = ["CHANGES NEEDED", "LGTM"]
         self.run_hook()
         transcript = self.repo / "author.jsonl"
-        rows = [
+        # Stop can fire before the final reply is flushed; only the event carries it.
+        transcript.write_text(json.dumps(
             {"type": "assistant", "sessionId": "author", "uuid": "a", "message": {"content": [
-                {"type": "tool_use", "name": "ExitPlanMode", "input": self.event["tool_input"]}]}},
-            {"type": "assistant", "sessionId": "author", "uuid": "b", "message": {"content": [
-                {"type": "text", "text": "<plan_review_context>Human scope decision.</plan_review_context>"}]}}
-        ]
-        transcript.write_text("\n".join(json.dumps(row) for row in rows))
-        result = self.run_hook({**self.event, "hook_event_name": "Stop", "transcript_path": str(transcript)})
+                {"type": "tool_use", "name": "ExitPlanMode", "input": self.event["tool_input"]}]}}))
+        result = self.run_hook({**self.event, "hook_event_name": "Stop", "transcript_path": str(transcript),
+                                "last_assistant_message": "<plan_review_context>Human scope decision.</plan_review_context>"})
         self.assertIn("LGTM", result["systemMessage"])
         self.assertNotIn("review_approved", result)
         self.assertEqual(self.calls[1][1], "Human scope decision.\n")

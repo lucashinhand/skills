@@ -21,7 +21,7 @@ def command(repo, prompt, session=None):
     if os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN"):
         servers = '{github = {url = "https://api.githubcopilot.com/mcp/", bearer_token_env_var = "GITHUB_PERSONAL_ACCESS_TOKEN", enabled_tools = ' + json.dumps(READ_TOOLS) + '}}'
     args = [binary, "-a", "never", "exec", "-C", str(repo), "-s", "read-only",
-            "-m", "gpt-6-astra", "-c", 'model_reasoning_effort="low"',
+            "-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"',
             "-c", 'model_provider="openai"', "--ignore-user-config",
             "--disable", "hooks", "--disable", "apps", "--disable", "plugins",
             "-c", "mcp_servers=" + servers]
@@ -101,7 +101,7 @@ def review(repo, plan, rubric, context=None, session=None, scope=None):
     auth = subprocess.run([args[0], "login", "status"], capture_output=True, text=True, timeout=20)
     if auth.returncode or "Logged in using ChatGPT" not in auth.stdout + auth.stderr:
         raise RuntimeError("Codex ChatGPT subscription login is required.")
-    completed = subprocess.run(args, cwd=repo, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=300)
+    completed = subprocess.run(args, cwd=repo, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=900)
     if completed.returncode:
         raise RuntimeError(f"Codex reviewer exited {completed.returncode}; no approval recorded.")
     result = parse_events(completed.stdout)
