@@ -13,24 +13,21 @@ def review(repo, plan, context, session):
 
 
 def context_input(event):
+    # Stop can fire before the final reply reaches the transcript, so read it from the event.
+    context = workflow.extract(workflow.CONTEXT, event.get("last_assistant_message") or "")
+    if context is None:
+        return None
     # Resolve only this author's exact transcript, never list the native plans directory.
     rows = [json.loads(line) for line in Path(event["transcript_path"]).read_text().splitlines() if line.strip()]
     messages = [row for row in rows if row.get("type") in ("assistant", "user")]
     if not messages or any(row.get("sessionId") != event["session_id"] for row in messages):
         raise ValueError("Claude transcript session mismatch.")
-    last = messages[-1]
-    if last["type"] != "assistant":
-        return None
-    text = "\n".join(part.get("text", "") for part in last["message"]["content"] if part.get("type") == "text")
-    context = workflow.extract(workflow.CONTEXT, text)
-    if context is None:
-        return None
     paths = [part.get("input", {}).get("planFilePath") for row in messages
              for part in row.get("message", {}).get("content", []) if isinstance(part, dict)
              and part.get("type") == "tool_use" and part.get("name") == "ExitPlanMode"]
     if not paths or not paths[-1]:
         raise ValueError("No native plan path in this author's transcript.")
-    return paths[-1], context, last["uuid"]
+    return paths[-1], context, workflow.digest(context)
 
 
 def process(event, skill=workflow.SKILL, run_review=review):

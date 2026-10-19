@@ -72,7 +72,7 @@ def reviewer_command(plan, context, session, rubric=None, scope=None):
         if context:
             prompt += f" Read the author's response at {context} before reassessing."
     command = [
-        binary, "-p", prompt, "--model", "claude-opus-5", "--effort", "low",
+        binary, "-p", prompt, "--model", "claude-opus-5-5", "--effort", "xhigh",
         "--safe-mode", "--restricted", "--disable-slash-commands",
         "--tools", "Read,Glob,Grep", "--allowedTools", "Read,Glob,Grep",
         "--permission-mode", "plan", "--permission-prompts", "none",
@@ -89,7 +89,7 @@ def reviewer_command(plan, context, session, rubric=None, scope=None):
 def review(repo, plan, context, session, rubric=None, scope=None):
     result = subprocess.run(
         reviewer_command(plan, context, session, rubric, scope), cwd=repo,
-        capture_output=True, text=True, timeout=300,
+        capture_output=True, text=True, timeout=900,
     )
     if result.returncode:
         raise RuntimeError(f"Claude reviewer exited {result.returncode}; no approval recorded.")

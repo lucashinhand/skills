@@ -11,7 +11,7 @@ to evade the review limit. Slugs use lowercase letters, digits and single hyphen
 at most 80 characters. Missing or ambiguous markers pause visibly.
 The hook owns all writes and reviewer bookkeeping; the planning agent remains read-only.
 
-The hook invokes the subscription-authenticated Claude CLI (claude-opus-5, low)
+The hook invokes the subscription-authenticated Claude CLI (claude-opus-5-5, xhigh)
 with only Read, Glob and Grep, safe/restricted mode, no MCP and no project hooks.
 This initial integration reviews local repository evidence only. If GitHub context
 is essential and absent from the plan, request it; never silently treat it as checked.
@@ -84,7 +84,7 @@ indicator still needs confirmation on the next interactive plan submission.
 ## Codex reviewer transport
 
 `scripts/codex_review.py --repo <repo> --plan <absolute-plan-path>` runs an
-independent Codex Astra/low review through the ChatGPT subscription. Add
+independent Codex Astra/medium review through the ChatGPT subscription. Add
 `--resume <session-id>` for follow-ups and `--context <path>` for author context.
 It returns JSON containing verdict, feedback and session_id; errors exit nonzero
 with an error field. This adapter is not itself a plan-ready hook.

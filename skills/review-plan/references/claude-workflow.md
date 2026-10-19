@@ -10,15 +10,16 @@ newlines. Each pass reviews a separate snapshot; approval requires the snapshot,
 exported copy and native source still to match the submitted SHA-256. Evidence
 and progress reporting follow [the shared workflow](codex-workflow.md).
 
-The shared loop runs Codex Astra/low with subscription authentication and an
+The shared loop runs Codex Astra/medium with subscription authentication and an
 enforced read-only tool surface. Revisions reuse the reviewer and three-pass
 budget keyed by repository and filename. Skill-local `.state` is disposable;
 the exported plan remains the implementation/ship handoff after reinstall.
 
 CHANGES NEEDED denies ExitPlanMode and returns feedback. Context or reasoned
 pushback uses `<plan_review_context>...</plan_review_context>` in an assistant
-response without revising the native plan. Stop resolves the exact plan path
-from this author's transcript and resumes the reviewer. New human decisions
+response without revising the native plan. Stop reads that reply from the hook's
+`last_assistant_message`, because the transcript may not hold it yet, resolves
+the exact plan path from this author's transcript and resumes the reviewer. New human decisions
 must be asked rather than invented. Errors/exhaustion pause visibly.
 LGTM asks for human permission at ExitPlanMode; it never approves implementation.
 
@@ -29,6 +30,8 @@ ExitPlanMode; it is not an end-to-end substitute for interactive hook testing.
 
 Register both events in the repository's ignored `.claude/settings.local.json`,
 not its shared settings: standalone Claude cloud must not depend on local Codex.
+Set each hook timeout above the reviewer's 900-second limit (for example 960), or
+the CLI kills a slow review before it can record a visible failure.
 Use the installed skill path, not a developer's source checkout. Restart/resume
 the local CLI after registration and verify the hook is loaded.
 The source adapter's native initial-review and human-approval boundary have been
