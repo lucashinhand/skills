@@ -13,11 +13,11 @@ SESSION = "01a09413-501b-79a1-be90-c54317bc77f5"
 
 
 class CodexReviewTests(unittest.TestCase):
-    def events(self, extra=()):
+    def events(self, extra=(), verdict="LGTM"):
         return "\n".join(json.dumps(row) for row in [
             {"type": "thread.started", "thread_id": SESSION},
             *extra,
-            {"type": "item.completed", "item": {"type": "agent_message", "text": "Verdict: LGTM"}},
+            {"type": "item.completed", "item": {"type": "agent_message", "text": "Verdict: " + verdict}},
             {"type": "turn.completed"},
         ])
 
@@ -28,6 +28,30 @@ class CodexReviewTests(unittest.TestCase):
         for event in ({"type": "turn.failed"}, {"type": "item.completed", "item": {"type": "error", "message": "Code Mode unavailable"}}):
             with self.assertRaises(RuntimeError):
                 reviewer.parse_events(self.events([event]))
+
+    def test_failed_exploration_does_not_block_changes_needed(self):
+        """A reviewer legitimately cats a missing file; that is not a broken reviewer."""
+        failed = {"type": "item.completed", "item": {"type": "command_execution", "status": "failed"}}
+        verdict, _, _ = reviewer.parse_events(self.events([failed], verdict="CHANGES NEEDED"))
+        self.assertEqual(verdict, "CHANGES NEEDED")
+
+    def test_failed_exploration_refuses_an_approval(self):
+        failed = {"type": "item.completed", "item": {"type": "command_execution", "status": "failed"}}
+        with self.assertRaisesRegex(RuntimeError, "failed tool call"):
+            reviewer.parse_events(self.events([failed]))
+
+    def test_transcript_tolerates_a_plain_non_zero_exit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "sessions").mkdir()
+            path = root / "sessions" / ("rollout-" + SESSION + ".jsonl")
+            rows = [
+                {"type": "session_meta", "payload": {"id": SESSION}},
+                {"type": "turn_context", "payload": {"turn_id": "current", "cwd": str(root), "sandbox_policy": {"type": "read-only"}}},
+                {"type": "response_item", "payload": {"type": "custom_tool_call_output", "internal_chat_message_metadata_passthrough": {"turn_id": "current"}, "output": [{"type": "input_text", "text": json.dumps({"exit_code": 1, "output": "no such file or directory"})}]}},
+            ]
+            path.write_text("\n".join(json.dumps(row) for row in rows))
+            reviewer.verify_transcript(SESSION, root, root)
 
     def test_missing_completion_and_ambiguous_verdict_refused(self):
         for output in (self.events().replace('"turn.completed"', '"turn.started"'), self.events().replace('Verdict: LGTM', 'Verdict: LGTM\\nVerdict: CHANGES NEEDED')):

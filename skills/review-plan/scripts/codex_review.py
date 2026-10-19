@@ -8,6 +8,11 @@ import re
 import shutil
 import subprocess
 
+# A denied or disabled tool means the reviewer could not do its job. An ordinary
+# non-zero exit does not: exploring a repository legitimately cats a file that is
+# not there or runs a glob that matches nothing.
+DENIAL = re.compile(r"operation not permitted|permission denied|tool.*(?:failed|disabled)", re.I)
+
 READ_TOOLS = ["get_me", "get_file_contents", "issue_read", "pull_request_read", "search_issues", "search_code", "list_commits", "get_commit"]
 
 
@@ -21,7 +26,7 @@ def command(repo, prompt, session=None):
     if os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN"):
         servers = '{github = {url = "https://api.githubcopilot.com/mcp/", bearer_token_env_var = "GITHUB_PERSONAL_ACCESS_TOKEN", enabled_tools = ' + json.dumps(READ_TOOLS) + '}}'
     args = [binary, "-a", "never", "exec", "-C", str(repo), "-s", "read-only",
-            "-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"',
+            "-m", "gpt-6-astra", "-c", 'model_reasoning_effort="medium"',
             "-c", 'model_provider="openai"', "--ignore-user-config",
             "--disable", "hooks", "--disable", "apps", "--disable", "plugins",
             "-c", "mcp_servers=" + servers]
@@ -39,18 +44,21 @@ def parse_events(stdout):
     if len(sessions) != 1 or not complete:
         raise RuntimeError("Codex returned no completed review/session.")
     messages = []
+    degraded = False
     for event in events:
         item = event.get("item", {})
         if event.get("type") in ("error", "turn.failed") or item.get("type") == "error":
             raise RuntimeError("Codex reported an execution error; no approval recorded.")
         if item.get("status") == "failed" or item.get("error"):
-            raise RuntimeError("Codex tool execution failed; no approval recorded.")
+            degraded = True
         if event.get("type") == "item.completed" and item.get("type") == "agent_message":
             messages.append(item.get("text", ""))
     feedback = messages[-1].strip() if messages else ""
     verdicts = re.findall(r"^Verdict: (LGTM|CHANGES NEEDED)\s*$", feedback, re.MULTILINE)
     if len(verdicts) != 1:
         raise RuntimeError("Codex returned no unambiguous verdict.")
+    if degraded and verdicts[0] == "LGTM":
+        raise RuntimeError("Codex approved after a failed tool call; no approval recorded.")
     return verdicts[0], feedback, sessions.pop()
 
 
@@ -83,10 +91,10 @@ def verify_transcript(session, repo, codex_home):
             try:
                 result = json.loads(value)
             except (ValueError, TypeError):
-                if re.search(r"operation not permitted|permission denied|tool.*(?:failed|disabled)", str(value), re.I):
+                if DENIAL.search(str(value)):
                     raise RuntimeError("Reviewer tool denial; human attention required.")
                 continue
-            if isinstance(result, dict) and (result.get("isError") or result.get("exit_code") not in (None, 0)):
+            if isinstance(result, dict) and (result.get("isError") or DENIAL.search(json.dumps(result))):
                 raise RuntimeError("Reviewer tool failed; human attention required.")
 
 
