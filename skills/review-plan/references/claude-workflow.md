@@ -10,7 +10,7 @@ newlines. Each pass reviews a separate snapshot; approval requires the snapshot,
 exported copy and native source still to match the submitted SHA-256. Evidence
 and progress reporting follow [the shared workflow](codex-workflow.md).
 
-The shared loop runs Codex GPT-6.1 Sol/high with subscription authentication and an
+The shared loop runs Codex Astra/medium with subscription authentication and an
 enforced read-only tool surface. Revisions reuse the reviewer and three-pass
 budget keyed by repository and filename. Skill-local `.state` is disposable;
 the exported plan remains the implementation/ship handoff after reinstall.

@@ -84,7 +84,7 @@ indicator still needs confirmation on the next interactive plan submission.
 ## Codex reviewer transport
 
 `scripts/codex_review.py --repo <repo> --plan <absolute-plan-path>` runs an
-independent Codex GPT-6.1 Sol/high review through the ChatGPT subscription. Add
+independent Codex Astra/medium review through the ChatGPT subscription. Add
 `--resume <session-id>` for follow-ups and `--context <path>` for author context.
 It returns JSON containing verdict, feedback and session_id; errors exit nonzero
 with an error field. This adapter is not itself a plan-ready hook.
