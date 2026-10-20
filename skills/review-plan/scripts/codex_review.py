@@ -12,6 +12,9 @@ import subprocess
 # non-zero exit does not: exploring a repository legitimately cats a file that is
 # not there or runs a glob that matches nothing.
 DENIAL = re.compile(r"operation not permitted|permission denied|tool.*(?:failed|disabled)", re.I)
+# git's xcrun shim cannot write its /tmp cache under the read-only sandbox and
+# says so on stderr while still returning the diff. That is noise, not a denial.
+NOISE = re.compile(r"^git: (?:warning|error): .*(?:confstr|xcrun_db).*$", re.M)
 
 READ_TOOLS = ["get_me", "get_file_contents", "issue_read", "pull_request_read", "search_issues", "search_code", "list_commits", "get_commit"]
 
@@ -91,10 +94,10 @@ def verify_transcript(session, repo, codex_home):
             try:
                 result = json.loads(value)
             except (ValueError, TypeError):
-                if DENIAL.search(str(value)):
+                if DENIAL.search(NOISE.sub("", str(value))):
                     raise RuntimeError("Reviewer tool denial; human attention required.")
                 continue
-            if isinstance(result, dict) and (result.get("isError") or DENIAL.search(json.dumps(result))):
+            if isinstance(result, dict) and (result.get("isError") or DENIAL.search(NOISE.sub("", json.dumps(result)))):
                 raise RuntimeError("Reviewer tool failed; human attention required.")
 
 
