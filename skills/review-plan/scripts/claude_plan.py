@@ -12,22 +12,67 @@ def review(repo, plan, context, session):
     return codex_review.review(repo, plan, workflow.SKILL / "SKILL.md", context, session)
 
 
-def context_input(event):
-    # Stop can fire before the final reply reaches the transcript, so read it from the event.
-    context = workflow.extract(workflow.CONTEXT, event.get("last_assistant_message") or "")
-    if context is None:
-        return None
+def transcript_messages(event):
     # Resolve only this author's exact transcript, never list the native plans directory.
-    rows = [json.loads(line) for line in Path(event["transcript_path"]).read_text().splitlines() if line.strip()]
+    rows = [json.loads(line) for line in Path(event["transcript_path"]).read_text(encoding="utf-8").splitlines() if line.strip()]
     messages = [row for row in rows if row.get("type") in ("assistant", "user")]
     if not messages or any(row.get("sessionId") != event["session_id"] for row in messages):
         raise ValueError("Claude transcript session mismatch.")
-    paths = [part.get("input", {}).get("planFilePath") for row in messages
-             for part in row.get("message", {}).get("content", []) if isinstance(part, dict)
-             and part.get("type") == "tool_use" and part.get("name") == "ExitPlanMode"]
-    if not paths or not paths[-1]:
+    return messages
+
+
+PLANS_DIR = Path.home() / ".claude" / "plans"
+
+
+def is_plan_file(path):
+    candidate = Path(path).resolve()
+    # gemini-resolved(B, threads=PRRT_kwDOPfMmP86s9rCL): native paths are absolute; a ~ path fails loudly at process()'s guard
+    return candidate.suffix == ".md" and candidate.parent == PLANS_DIR.resolve()
+
+
+def tool_uses(messages):
+    for row in reversed(messages):
+        for part in reversed(row.get("message", {}).get("content", []) or []):
+            if isinstance(part, dict) and part.get("type") == "tool_use":
+                yield part
+
+
+def plan_path(messages):
+    # Newest evidence wins. The live event's own path already takes precedence in
+    # process(), so an older ExitPlanMode here is history: a plan written after it
+    # supersedes it, or that superseding plan would go unreviewed behind its approval.
+    # A blocked write still appears as a tool use, so only successful ones count.
+    failed = {part.get("tool_use_id") for row in messages
+              for part in row.get("message", {}).get("content", []) or []
+              if isinstance(part, dict) and part.get("type") == "tool_result" and part.get("is_error")}
+    for part in tool_uses(messages):
+        if part.get("id") in failed:
+            continue
+        # gemini-resolved(B, threads=PRRT_kwDOPfMmP86s9rCX): a tool_use input is always a dict; a null one must fail loudly
+        if part.get("name") == "ExitPlanMode":
+            supplied = part.get("input", {}).get("planFilePath")
+            if supplied:
+                return supplied
+        elif part.get("name") in ("Write", "Edit"):
+            candidate = part.get("input", {}).get("file_path")
+            if candidate and is_plan_file(candidate):
+                return candidate
+    return None
+
+
+def context_input(event):
+    messages = transcript_messages(event)
+    last = messages[-1]
+    if last["type"] != "assistant":
+        return None
+    text = "\n".join(part.get("text", "") for part in last["message"]["content"] if part.get("type") == "text")
+    context = workflow.extract(workflow.CONTEXT, text)
+    if context is None:
+        return None
+    path = plan_path(messages)
+    if not path:
         raise ValueError("No native plan path in this author's transcript.")
-    return paths[-1], context, workflow.digest(context)
+    return path, context, last["uuid"]
 
 
 def process(event, skill=workflow.SKILL, run_review=review):
@@ -45,7 +90,10 @@ def process(event, skill=workflow.SKILL, run_review=review):
             return {}
         filename, context, turn = resolved
     else:
+        # gemini-resolved(B, threads=PRRT_kwDOPfMmP86s9rCd): the hook event's tool_input is always a dict; a null one must fail loudly
         filename = event.get("tool_input", {}).get("planFilePath")
+        if not filename and event.get("transcript_path"):
+            filename = plan_path(transcript_messages(event))
         turn = event["tool_use_id"]
     if not isinstance(filename, str) or not Path(filename).is_absolute():
         raise ValueError("Claude did not supply an absolute native plan path.")

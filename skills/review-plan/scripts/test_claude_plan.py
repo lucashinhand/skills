@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 import claude_plan
 
@@ -119,17 +120,118 @@ class ClaudePlanTests(unittest.TestCase):
         self.results = ["CHANGES NEEDED", "LGTM"]
         self.run_hook()
         transcript = self.repo / "author.jsonl"
-        # Stop can fire before the final reply is flushed; only the event carries it.
-        transcript.write_text(json.dumps(
+        rows = [
             {"type": "assistant", "sessionId": "author", "uuid": "a", "message": {"content": [
-                {"type": "tool_use", "name": "ExitPlanMode", "input": self.event["tool_input"]}]}}))
-        result = self.run_hook({**self.event, "hook_event_name": "Stop", "transcript_path": str(transcript),
-                                "last_assistant_message": "<plan_review_context>Human scope decision.</plan_review_context>"})
+                {"type": "tool_use", "name": "ExitPlanMode", "input": self.event["tool_input"]}]}},
+            {"type": "assistant", "sessionId": "author", "uuid": "b", "message": {"content": [
+                {"type": "text", "text": "<plan_review_context>Human scope decision.</plan_review_context>"}]}}
+        ]
+        transcript.write_text("\n".join(json.dumps(row) for row in rows))
+        result = self.run_hook({**self.event, "hook_event_name": "Stop", "transcript_path": str(transcript)})
         self.assertIn("LGTM", result["systemMessage"])
         self.assertNotIn("review_approved", result)
         self.assertEqual(self.calls[1][1], "Human scope decision.\n")
         self.assertEqual(self.calls[1][2], "codex-reviewer")
         self.assertEqual(self.calls[1][0].read_text(), self.plan.read_text())
+
+    def write_transcript(self, path, session="author"):
+        row = {"type": "assistant", "sessionId": session, "uuid": "a", "message": {"content": [
+            {"type": "tool_use", "name": "Write", "input": {"file_path": str(path)}}]}}
+        transcript = self.repo / "author.jsonl"
+        transcript.write_text(json.dumps(row))
+        return {**self.event, "tool_input": {"plan": "# inline"}, "transcript_path": str(transcript)}
+
+    def use_plans_dir(self):
+        plans = self.repo / "plans"
+        plans.mkdir(exist_ok=True)
+        patcher = mock.patch.object(claude_plan, "PLANS_DIR", plans)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return plans
+
+    def test_transcript_write_to_plans_dir_supplies_missing_path(self):
+        plan = self.use_plans_dir() / "wise-otter.md"
+        plan.write_text("# Written plan\n")
+        result = self.run_hook(self.write_transcript(plan))
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "ask")
+        self.assertEqual(self.calls[0][0].read_text(), "# Written plan\n")
+
+    def test_transcript_write_outside_plans_dir_is_ignored(self):
+        self.use_plans_dir()
+        with self.assertRaises(ValueError):
+            self.run_hook(self.write_transcript("/tmp/notes.md"))
+        self.assertEqual(self.calls, [])
+
+    def test_write_to_other_plans_directory_is_ignored(self):
+        self.use_plans_dir()
+        other = self.repo / "elsewhere" / "plans"
+        other.mkdir(parents=True)
+        (other / "x.md").write_text("# Other\n")
+        with self.assertRaises(ValueError):
+            self.run_hook(self.write_transcript(other / "x.md"))
+        self.assertEqual(self.calls, [])
+
+    def test_failed_write_is_ignored(self):
+        plan = self.use_plans_dir() / "wise-otter.md"
+        plan.write_text("# Blocked\n")
+        event = self.write_transcript(plan)
+        path = Path(event["transcript_path"])
+        row = json.loads(path.read_text())
+        row["message"]["content"][0]["id"] = "w1"
+        result_row = {"type": "user", "sessionId": "author", "uuid": "r", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "w1", "is_error": True, "content": "blocked"}]}}
+        path.write_text("\n".join(json.dumps(r) for r in (row, result_row)))
+        with self.assertRaises(ValueError):
+            self.run_hook(event)
+        self.assertEqual(self.calls, [])
+
+    def test_later_write_supersedes_a_historical_exit_plan_path(self):
+        # A session that reviewed one plan, then wrote another, proposes the newer
+        # one: resolving the stale path would review it behind the older approval.
+        later = self.use_plans_dir() / "later.md"
+        later.write_text("# Later\n")
+        rows = [
+            {"type": "assistant", "sessionId": "author", "uuid": "a", "message": {"content": [
+                {"type": "tool_use", "name": "ExitPlanMode", "input": {"planFilePath": str(self.plan)}}]}},
+            {"type": "assistant", "sessionId": "author", "uuid": "b", "message": {"content": [
+                {"type": "tool_use", "name": "Write", "input": {"file_path": str(later)}}]}}]
+        transcript = self.repo / "author.jsonl"
+        transcript.write_text("\n".join(json.dumps(row) for row in rows))
+        self.run_hook({**self.event, "tool_input": {}, "transcript_path": str(transcript)})
+        self.assertEqual(self.calls[0][0].read_text(), "# Later\n")
+
+    def test_live_event_path_beats_transcript_evidence(self):
+        later = self.use_plans_dir() / "later.md"
+        later.write_text("# Later\n")
+        rows = [{"type": "assistant", "sessionId": "author", "uuid": "a", "message": {"content": [
+            {"type": "tool_use", "name": "Write", "input": {"file_path": str(later)}}]}}]
+        transcript = self.repo / "author.jsonl"
+        transcript.write_text("\n".join(json.dumps(row) for row in rows))
+        self.run_hook({**self.event, "transcript_path": str(transcript)})
+        self.assertEqual(self.calls[0][0].read_text(), self.plan.read_text())
+
+    def test_stop_hook_uses_transcript_fallback(self):
+        plan = self.use_plans_dir() / "wise-otter.md"
+        plan.write_text("# Written plan\n")
+        self.results = ["CHANGES NEEDED", "LGTM"]
+        self.run_hook({**self.event, "tool_input": {"planFilePath": str(plan)}})
+        rows = [
+            {"type": "assistant", "sessionId": "author", "uuid": "a", "message": {"content": [
+                {"type": "tool_use", "name": "ExitPlanMode", "input": {"plan": "# inline"}},
+                {"type": "tool_use", "name": "Write", "input": {"file_path": str(plan)}}]}},
+            {"type": "assistant", "sessionId": "author", "uuid": "b", "message": {"content": [
+                {"type": "text", "text": "<plan_review_context>Human scope decision.</plan_review_context>"}]}}]
+        transcript = self.repo / "author.jsonl"
+        transcript.write_text("\n".join(json.dumps(row) for row in rows))
+        result = self.run_hook({**self.event, "hook_event_name": "Stop", "transcript_path": str(transcript)})
+        self.assertIn("LGTM", result["systemMessage"])
+        self.assertEqual(self.calls[1][0].read_text(), "# Written plan\n")
+        self.assertEqual(self.calls[1][1], "Human scope decision.\n")
+
+    def test_transcript_from_another_session_is_rejected(self):
+        event = self.write_transcript(self.repo / "plans" / "wise-otter.md", session="other")
+        with self.assertRaisesRegex(ValueError, "session mismatch"):
+            self.run_hook(event)
 
 
 if __name__ == "__main__":
