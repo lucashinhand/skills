@@ -55,17 +55,21 @@ class CodexReviewTests(unittest.TestCase):
 
     def test_transcript_tolerates_git_xcrun_cache_noise(self):
         noise = "git: error: couldn't create cache file '/tmp/xcrun_db-A1' (errno=Operation not permitted)\ndiff --git a/a b/a"
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "sessions").mkdir()
-            path = root / "sessions" / ("rollout-" + SESSION + ".jsonl")
-            rows = [
-                {"type": "session_meta", "payload": {"id": SESSION}},
-                {"type": "turn_context", "payload": {"turn_id": "current", "cwd": str(root), "sandbox_policy": {"type": "read-only"}}},
-                {"type": "response_item", "payload": {"type": "custom_tool_call_output", "internal_chat_message_metadata_passthrough": {"turn_id": "current"}, "output": [{"type": "input_text", "text": noise}]}},
-            ]
-            path.write_text("\n".join(json.dumps(row) for row in rows))
-            reviewer.verify_transcript(SESSION, root, root)
+        file_content = "| Tool consolidation | Reduce costs |\nA failed deploy creates no tag."
+        # Code-mode output is one line of concatenated JSON-escaped chunks.
+        code_mode = "text(" + json.dumps({"output": noise}) + ")\ntext(" + json.dumps({"output": file_content}) + ")"
+        for text in (noise, code_mode):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "sessions").mkdir()
+                path = root / "sessions" / ("rollout-" + SESSION + ".jsonl")
+                rows = [
+                    {"type": "session_meta", "payload": {"id": SESSION}},
+                    {"type": "turn_context", "payload": {"turn_id": "current", "cwd": str(root), "sandbox_policy": {"type": "read-only"}}},
+                    {"type": "response_item", "payload": {"type": "custom_tool_call_output", "internal_chat_message_metadata_passthrough": {"turn_id": "current"}, "output": [{"type": "input_text", "text": text}]}},
+                ]
+                path.write_text("\n".join(json.dumps(row) for row in rows))
+                reviewer.verify_transcript(SESSION, root, root)
 
     def test_missing_completion_and_ambiguous_verdict_refused(self):
         for output in (self.events().replace('"turn.completed"', '"turn.started"'), self.events().replace('Verdict: LGTM', 'Verdict: LGTM\\nVerdict: CHANGES NEEDED')):

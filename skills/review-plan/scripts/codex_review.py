@@ -14,7 +14,14 @@ import subprocess
 DENIAL = re.compile(r"operation not permitted|permission denied|tool.*(?:failed|disabled)", re.I)
 # git's xcrun shim cannot write its /tmp cache under the read-only sandbox and
 # says so on stderr while still returning the diff. That is noise, not a denial.
-NOISE = re.compile(r"^git: (?:warning|error): .*(?:confstr|xcrun_db).*$", re.M)
+NOISE = re.compile(r"git: (?:warning|error): .*(?:confstr|xcrun_db).*$", re.M)
+
+
+def denied(text):
+    # Code-mode output arrives JSON-escaped on one line. Restore its newlines so
+    # NOISE can anchor and DENIAL cannot span unrelated lines of file content.
+    return DENIAL.search(NOISE.sub("", text.replace("\\n", "\n")))
+
 
 READ_TOOLS = ["get_me", "get_file_contents", "issue_read", "pull_request_read", "search_issues", "search_code", "list_commits", "get_commit"]
 
@@ -94,10 +101,10 @@ def verify_transcript(session, repo, codex_home):
             try:
                 result = json.loads(value)
             except (ValueError, TypeError):
-                if DENIAL.search(NOISE.sub("", str(value))):
+                if denied(str(value)):
                     raise RuntimeError("Reviewer tool denial; human attention required.")
                 continue
-            if isinstance(result, dict) and (result.get("isError") or DENIAL.search(NOISE.sub("", json.dumps(result)))):
+            if isinstance(result, dict) and (result.get("isError") or denied(json.dumps(result))):
                 raise RuntimeError("Reviewer tool failed; human attention required.")
 
 
