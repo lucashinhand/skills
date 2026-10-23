@@ -10,6 +10,7 @@ SPEC = importlib.util.spec_from_file_location("codex_review", Path(__file__).wit
 reviewer = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(reviewer)
 SESSION = "01a09413-501b-79a1-be90-c54317bc77f5"
+DENIED_CHUNK = {"chunk_id": "x", "exit_code": 1, "output": "zsh:1: operation not permitted: /tmp/probe.txt\n"}
 
 
 class CodexReviewTests(unittest.TestCase):
@@ -64,6 +65,11 @@ class CodexReviewTests(unittest.TestCase):
             "running chunk": json.dumps({"chunk_id": "b", "session_id": 7, "output": "permission denied"}),
             "MCP not found": json.dumps({"isError": True, "content": [{"type": "text", "text": "GitHub API error 404: Not Found"}]}),
             "script syntax error": "Script error:\nSyntaxError: Unexpected token 'E', \"[Errno 1] O\"... is not valid JSON",
+            "settled missing file": json.dumps([{"status": "fulfilled", "value": {"exit_code": 1, "output": "cat: x: No such file or directory"}}]),
+            "settled ordinary rejection": json.dumps({"i": 0, "status": "rejected", "reason": "exec_command failed: No such file or directory"}),
+            "plain exec missing file": "Chunk ID: a\nWall time: 0.0 seconds\nProcess exited with code 1\nOriginal token count: 5\nOutput:\ncat: x: No such file or directory\n",
+            "plain exec success quoting denial": "Chunk ID: a\nWall time: 0.0 seconds\nProcess exited with code 0\nOriginal token count: 5\nOutput:\nzsh:1: operation not permitted: /tmp/x\n",
+            "truncated success": 'Warning: truncated output (original token count: 9000)\nTotal output lines: 900\n\n{"chunk_id":"a","exit_code":0,"output":"zsh:1: operation not permitted…8000 tokens truncated…',
         }
         for name, text in cases.items():
             with self.subTest(name):
@@ -79,6 +85,13 @@ class CodexReviewTests(unittest.TestCase):
             "approval timeout": ("Script failed\n", "Script error:\nThe automatic permission approval review did not finish before its deadline."),
             "MCP refusal": ("Script completed\n", json.dumps({"isError": True, "content": [{"type": "text", "text": "This action was rejected due to unacceptable risk."}]})),
             "MCP auth": ("Script completed\n", json.dumps({"isError": True, "content": [{"type": "text", "text": "GitHub API error 401: Bad credentials"}]})),
+            "settled denial": ("Script completed\n", json.dumps({"status": "fulfilled", "value": DENIED_CHUNK})),
+            "indexed settled denial": ("Script completed\n", json.dumps({"i": 0, "status": "fulfilled", "value": DENIED_CHUNK})),
+            "settled list denial": ("Script completed\n", json.dumps([{"status": "fulfilled", "value": DENIED_CHUNK}])),
+            "settled MCP refusal": ("Script completed\n", json.dumps({"status": "fulfilled", "value": {"isError": True, "content": [{"type": "text", "text": "This action was rejected due to unacceptable risk."}]}})),
+            "settled harness rejection": ("Script completed\n", json.dumps({"status": "rejected", "reason": "exec_command failed: CreateProcess { message: \"Rejected(\\\"This action was rejected due to unacceptable risk.\\\")\" }"})),
+            "plain exec denial": ("Chunk ID: a\nWall time: 0.0 seconds\nProcess exited with code 1\nOriginal token count: 5\nOutput:\nzsh:1: operation not permitted: /tmp/probe.txt\n",),
+            "truncated denial": ("Script completed\n", 'Warning: truncated output (original token count: 9000)\nTotal output lines: 900\n\n{"chunk_id":"a","exit_code":0,"output":"diff…8000 tokens truncated…"}\n{"chunk_id":"b","exit_code":128,"output":"fatal: Unable to create \'/repo/.git/index.lock\': Operation not permitted\\n"}'),
         }
         for name, texts in cases.items():
             with self.subTest(name), self.assertRaisesRegex(RuntimeError, "human attention"):

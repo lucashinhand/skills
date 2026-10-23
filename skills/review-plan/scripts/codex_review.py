@@ -11,7 +11,8 @@ import subprocess
 # A denied or disabled tool means the reviewer could not do its job. An ordinary
 # non-zero exit does not: exploring a repository legitimately cats a file that is
 # not there or runs a glob that matches nothing. Tool output also carries whole
-# files that mention denials, so only structural signals count, never content.
+# files that mention denials, so it is searched only once the command itself
+# failed, and successful output is never searched.
 #
 # Refusals and auth failures lead a code-mode script error or MCP error; other
 # errors (a missing path, an unknown issue) are ordinary exploration.
@@ -21,8 +22,37 @@ REFUSAL = re.compile(r"rejected|not permitted|permission denied|sandbox denied|a
 ERRNO_DENIAL = re.compile(r"(?:: |\] )(?:operation not permitted|permission denied|read-only file system)\b", re.I)
 
 
+# exec_command called outside code mode returns a text header, not a JSON chunk.
+PLAIN_EXEC = re.compile(r"^Process exited with code (\d+)$.*?^Output:\n(.*)", re.M | re.S)
+TRUNCATED_FAILURE = re.compile(r'"exit_code":\s*[1-9]')
+
+
 def first_line(text):
     return text.strip().split("\n", 1)[0]
+
+
+def parsed(text):
+    try:
+        return json.loads(text)
+    except (ValueError, TypeError):
+        pass
+    plain = PLAIN_EXEC.search(text)
+    if plain:
+        return {"exit_code": int(plain.group(1)), "output": plain.group(2)}
+    # Outer truncation elides the middle of the JSON, so it no longer parses.
+    if text.startswith("Warning: truncated output") and TRUNCATED_FAILURE.search(text):
+        return {"exit_code": 1, "output": text}
+    return None
+
+
+def results(value):
+    # Code-mode scripts may wrap chunks, e.g. Promise.allSettled's {status, value}.
+    if isinstance(value, dict):
+        yield value
+        value = list(value.values())
+    if isinstance(value, list):
+        for item in value:
+            yield from results(item)
 
 
 def tool_failure(blocks):
@@ -31,13 +61,10 @@ def tool_failure(blocks):
     refused_script = texts and texts[0].startswith("Script failed") and REFUSAL.search(first_line(script_error.removeprefix("Script error:")))
     if refused_script:
         return "Reviewer tool denial; human attention required."
-    for text in texts:
-        try:
-            result = json.loads(text)
-        except (ValueError, TypeError):
-            continue
-        if not isinstance(result, dict):
-            continue
+    for result in (result for text in texts for result in results(parsed(text))):
+        rejected_call = result.get("status") == "rejected" and REFUSAL.search(first_line(str(result.get("reason", ""))))
+        if rejected_call:
+            return "Reviewer tool denial; human attention required."
         mcp_error = "".join(item.get("text", "") for item in result.get("content") or []) if result.get("isError") else ""
         if REFUSAL.search(first_line(mcp_error)):
             return "Reviewer tool failed; human attention required."
