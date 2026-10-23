@@ -102,6 +102,10 @@ the current head and whether any review threads are unanswered, with the
 session URL. Do not message the session from that check. Without one-shot
 scheduling, say so rather than claim a check is pending.
 
+That check is never followed by another on its own, even when work remains.
+Schedule a fresh thirty-minute check only when the human says the session is
+moving again, for example after answering its prompt or restarting the owner.
+
 When the human reports back or the check finds Gemini approval, verify the
 handoff-specific readiness comment and current head, record `ready`, and
 continue to final approval. If the owner has stopped or failed, `pause` with
