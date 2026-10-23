@@ -11,38 +11,6 @@ import subprocess
 import time
 
 
-def monitor(state, args):
-    now = time.time()
-    progress = args.cursor != state.get("activity_cursor")
-    index = 0 if progress else min(state.get("poll_index", -1) + 1, 4)
-    updated = dict(state, activity_cursor=args.cursor, poll_index=index,
-                   next_check_seconds=(60, 60, 120, 180, 300)[index], action="wait")
-    if state["status"] in ("paused", "complete"):
-        return dict(updated, action="stop-monitoring")
-    if state["status"] in ("launching", "awaiting-ready"):
-        age = now - state.get("startup_at", state["created_at"])
-        if age >= 600:
-            return dict(updated, status="paused", reason="readiness deadline exceeded", action="report-blocker")
-        if age >= 300 and not state.get("startup_nudge_sent"):
-            action = "send-startup-nudge" if state["session_id"] else "reconcile-launch"
-            return dict(updated, action=action)
-        return updated
-    if progress or not args.work_owed:
-        updated = dict(updated, work_owed_since=now if args.work_owed else None,
-                       recovery_nudge_sent_at=None)
-        return updated
-    owed_since = state.get("work_owed_since")
-    if owed_since is None:
-        return dict(updated, work_owed_since=now)
-    nudged = state.get("recovery_nudge_sent_at")
-    if nudged is not None and now - nudged >= 300:
-        return dict(updated, status="paused", reason="recovery acknowledgement deadline exceeded",
-                    action="report-blocker")
-    if nudged is None and now - owed_since >= 1800:
-        return dict(updated, action="send-recovery-nudge")
-    return updated
-
-
 def change(state, args):
     if args.command == "begin":
         if state:
@@ -64,26 +32,12 @@ def change(state, args):
         return state
     if args.handoff != state["handoff"]:
         raise ValueError("Stale handoff; refusing to change another owner's record.")
-    if args.command == "observe":
-        return monitor(state, args)
-    if args.command == "nudged":
-        if args.kind == "startup" and state.get("action") == "send-startup-nudge":
-            return dict(state, startup_nudge_sent=True, action="wait")
-        if args.kind == "recovery" and state.get("action") == "send-recovery-nudge":
-            return dict(state, recovery_nudge_sent_at=time.time(), action="wait")
-        raise ValueError("No matching nudge is pending.")
-    if args.command == "acknowledged":
-        if state["status"] != "active" or not args.evidence.strip():
-            raise ValueError("Acknowledgement requires an active owner and receipt evidence.")
-        return dict(state, recovery_nudge_sent_at=None, work_owed_since=time.time(),
-                    acknowledgement=args.evidence)
     if args.command == "resume":
         if state["status"] != "paused" or not args.evidence.strip():
             raise ValueError("Resume requires a paused handoff and acknowledgement evidence.")
         if not state["session_id"] or args.session != state["session_id"]:
             raise ValueError("Resume must retain the recorded owner; reconcile an unknown launch first.")
-        return dict(state, status="awaiting-ready", recovery_evidence=args.evidence,
-                    startup_at=time.time(), startup_nudge_sent=False)
+        return dict(state, status="awaiting-ready", recovery_evidence=args.evidence)
     if args.command == "replace":
         if state["status"] not in ("paused", "complete"):
             raise ValueError("Pause and verify the old owner has stopped before replacement.")
@@ -131,7 +85,7 @@ def main():
         begin.add_argument(f"--{name}", required=True)
     begin.add_argument("--plan", help="Exact approved exported plan path, if any")
     commands.add_parser("read")
-    for name in ("bind", "ready", "pause", "complete", "resume", "replace", "observe", "nudged", "acknowledged"):
+    for name in ("bind", "ready", "pause", "complete", "resume", "replace"):
         command = commands.add_parser(name)
         command.add_argument("--handoff", required=True)
         if name in ("bind", "ready", "resume"):
@@ -140,13 +94,8 @@ def main():
             command.add_argument("--reason", required=True)
         if name in ("complete", "replace"):
             command.add_argument("--head", required=True)
-        if name in ("resume", "replace", "acknowledged"):
+        if name in ("resume", "replace"):
             command.add_argument("--evidence", required=True)
-        if name == "observe":
-            command.add_argument("--cursor", required=True, help="Last meaningful owner progress, not arbitrary PR activity")
-            command.add_argument("--work-owed", action="store_true")
-        if name == "nudged":
-            command.add_argument("--kind", choices=("startup", "recovery"), required=True)
         if name == "replace":
             command.add_argument("--previous-owner-stopped", action="store_true", required=True)
     args = parser.parse_args()

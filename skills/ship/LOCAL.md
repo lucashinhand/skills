@@ -1,8 +1,8 @@
 # Ship — Local Flow
 
 For Codex or Claude CLI without native PR activity subscriptions. Claude cloud
-owns fixes and review-thread writes; the local implementer supervises liveness
-and performs final review. This workflow never merges.
+owns fixes and review-thread writes; the local implementer hands the session to
+the human and performs final review. This workflow never merges.
 
 ## Implementation review
 
@@ -78,52 +78,45 @@ readiness and current-head dual approval. Do not merge.
 
 Pass this as one quoted argument to `claude --cloud <prompt>` in a TTY from the
 verified checkout. The skill must already be committed and available to the cloud
-checkout. Save the exact returned session ID with `bind` before monitoring. Do
-not force a model/effort or replace subscription authentication with an API key.
+checkout. Save the exact returned session ID with `bind` before handing over. Do
+not pass a model/effort or replace subscription authentication with an API key:
+the cloud session takes the repository's pinned settings defaults, never the
+launching session's interactive model or effort.
 
 The owner must verify the target checkout, fast-forward to the exact current PR
 head, subscribe, initialise its own state and post the handoff-specific readiness
 comment with its session URL before fixing. A subscription handshake alone is
 not readiness. A cloud-provisioned branch is never an alternative push target.
 
-## Supervise without competing for fixes
+## Hand over, then step back
 
-On each tick run the supervisor recorder's `observe --handoff <id> --cursor
-<last-meaningful-owner-progress> [--work-owed]`. The cursor represents verified
-owner progress (a fix commit, substantive response or acknowledgement), not
-arbitrary comments, CI noise or your own polling. Set work owed only when the
-owner has an actionable task; waiting for Gemini is not inactivity debt.
-Use the returned `next_check_seconds` and `action`. `reconcile-launch` means the
-session identity is still unknown: investigate, never start another session.
-For `send-startup-nudge` or `send-recovery-nudge`, send once to the recorded
-session, then record `nudged --handoff <id> --kind startup|recovery` after CLI
-send acceptance. A send failure pauses with the concrete error. Record
-`acknowledged --handoff <id> --evidence <receipt>` only after an actual owner
-response, not merely CLI send acceptance. `report-blocker` pauses the workflow;
-`stop-monitoring` stops scheduling. The script computes decisions but does not
-schedule itself, inspect GitHub, send messages or verify supplied evidence.
+Give the human the cloud session URL and stop. Do not schedule recurring checks,
+send nudges or run readiness and recovery timers: the human watches the session,
+answers its permission prompts and reports back when it is done or stuck. A
+silent owner is usually waiting on a prompt only the human can see.
 
-Use the harness's supported recurring monitoring facility with read-only GitHub
-MCP checks. Poll at 1, 1, 2, 3, then 5-minute intervals, capped at 5 minutes;
-reset on meaningful progress. Track an activity cursor and the current handoff.
-If no recurring facility is available, report that limitation rather than claim
-background monitoring is running.
+If the human has not returned after thirty minutes, make one read-only GitHub
+check. Use the harness's one-shot scheduling, and cancel it as soon as the
+human returns or reports Gemini approval. Report whether Gemini has approved
+the current head and whether any review threads are unanswered, with the
+session URL. Do not message the session from that check. Without one-shot
+scheduling, say so rather than claim a check is pending.
 
-If startup has no readiness after five minutes, send one same-session nudge.
-At ten minutes without readiness, pause and report the existing session URL.
-If work is owed but there is no meaningful progress for thirty minutes, send one
-same-session recovery message; without acknowledgement after five minutes,
-pause and surface the blocker. Do not reset review breakers or take over writes.
+That check is never followed by another on its own, even when work remains.
+Schedule a fresh thirty-minute check only when the human says the session is
+moving again, for example after answering its prompt or restarting the owner.
 
-Send follow-ups using `claude -p <message> --cloud <recorded-session-id>`.
-CLI send acceptance is not proof of receipt. Require an owner acknowledgement
-for recovery or ownership transitions. An archived session cannot be resumed;
-confirm the old owner has stopped before replacing it with a new handoff.
+When the human reports back or the check finds Gemini approval, verify the
+handoff-specific readiness comment and current head, record `ready`, and
+continue to final approval. If the owner has stopped or failed, `pause` with
+the reason and let the human choose between `resume` and `replace`.
 
-Do not critique or steer every intermediate fix. Relay explicit human direction
-to the existing owner. Review the final implementation when Gemini approves the
-current head. Final objections go to that same owner, who continues fixing.
-Only the owner pushes, replies to review threads and updates review counters.
+Relay explicit human direction to the existing owner with
+`claude -p <message> --cloud <recorded-session-id>`; CLI send acceptance is not
+proof of receipt. Do not critique or steer every intermediate fix. Final
+objections go to that same owner, who continues fixing. Only the owner pushes,
+replies to review threads and updates review counters. An archived session
+cannot be resumed; confirm the old owner has stopped before replacing it.
 
 ## Final approval
 
@@ -131,8 +124,8 @@ Assess the current diff against the exact approved plan, when one exists, and
 the repository's rules. Re-read the PR head immediately before posting
 `LGTM — implementer session @ <full-head-SHA>`. A moved head needs fresh review.
 The owner terminates only when Gemini and implementer approval cover that head.
-After confirmed completion, remove only the associated exported plan and stop
-supervision. Never delete Claude's native plan or unrelated plan files.
+After confirmed completion, remove only the associated exported plan and cancel
+any pending one-shot check. Never delete Claude's native plan or unrelated plan files.
 
 ## Installation requirements
 
