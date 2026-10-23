@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import claude_review
 import review_impl
 
 
@@ -112,13 +113,13 @@ class ImplementationReviewTests(unittest.TestCase):
     def test_live_claude_verdict_format_contract(self):
         for text, valid in (("**Verdict: LGTM**", False), ("Verdict: LGTM", True)):
             output = subprocess.CompletedProcess([], 0, json.dumps({"result": text, "session_id": "review-session"}), "")
-            with patch.object(review_impl.plan_workflow, "reviewer_command", return_value=["claude"]), patch.object(review_impl.plan_workflow.subprocess, "run", return_value=output):
+            with patch.object(claude_review, "reviewer_command", return_value=["claude"]), patch.object(claude_review.subprocess, "run", return_value=output):
                 if valid:
-                    result = review_impl.plan_workflow.review(self.repo, self.plan, None, None)
+                    result = claude_review.review(self.repo, self.plan, self.plan, self.plan)
                     self.assertEqual(result[0], "LGTM")
                 else:
                     with self.assertRaisesRegex(RuntimeError, "unambiguous verdict"):
-                        review_impl.plan_workflow.review(self.repo, self.plan, None, None)
+                        claude_review.review(self.repo, self.plan, self.plan, self.plan)
 
 
 if __name__ == "__main__":
