@@ -10,17 +10,41 @@ import subprocess
 
 # A denied or disabled tool means the reviewer could not do its job. An ordinary
 # non-zero exit does not: exploring a repository legitimately cats a file that is
-# not there or runs a glob that matches nothing.
-DENIAL = re.compile(r"operation not permitted|permission denied|tool.*(?:failed|disabled)", re.I)
-# git's xcrun shim cannot write its /tmp cache under the read-only sandbox and
-# says so on stderr while still returning the diff. That is noise, not a denial.
-NOISE = re.compile(r"git: (?:warning|error): .*(?:confstr|xcrun_db).*$", re.M)
+# not there or runs a glob that matches nothing. Tool output also carries whole
+# files that mention denials, so only structural signals count, never content.
+#
+# Refusals and auth failures lead a code-mode script error or MCP error; other
+# errors (a missing path, an unknown issue) are ordinary exploration.
+REFUSAL = re.compile(r"rejected|not permitted|permission denied|sandbox denied|approval review|cancelled|unauthori[sz]ed|forbidden|bad credentials|\b40[13]\b", re.I)
+# A denied command reports errno-style (`zsh:1: operation not permitted: <path>`,
+# `[Errno 1] Operation not permitted`), unlike prose quoting the phrase.
+ERRNO_DENIAL = re.compile(r"(?:: |\] )(?:operation not permitted|permission denied|read-only file system)\b", re.I)
 
 
-def denied(text):
-    # Code-mode output arrives JSON-escaped on one line. Restore its newlines so
-    # NOISE can anchor and DENIAL cannot span unrelated lines of file content.
-    return DENIAL.search(NOISE.sub("", text.replace("\\n", "\n")))
+def first_line(text):
+    return text.strip().split("\n", 1)[0]
+
+
+def tool_failure(blocks):
+    texts = [str(block.get("text", "")) for block in blocks]
+    script_error = next((text for text in texts if text.startswith("Script error:")), "")
+    refused_script = texts and texts[0].startswith("Script failed") and REFUSAL.search(first_line(script_error.removeprefix("Script error:")))
+    if refused_script:
+        return "Reviewer tool denial; human attention required."
+    for text in texts:
+        try:
+            result = json.loads(text)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(result, dict):
+            continue
+        mcp_error = "".join(item.get("text", "") for item in result.get("content") or []) if result.get("isError") else ""
+        if REFUSAL.search(first_line(mcp_error)):
+            return "Reviewer tool failed; human attention required."
+        denied_command = result.get("exit_code") not in (0, None) and ERRNO_DENIAL.search(str(result.get("output", "")))
+        if denied_command:
+            return "Reviewer tool denial; human attention required."
+    return None
 
 
 READ_TOOLS = ["get_me", "get_file_contents", "issue_read", "pull_request_read", "search_issues", "search_code", "list_commits", "get_commit"]
@@ -95,17 +119,9 @@ def verify_transcript(session, repo, codex_home):
         if payload.get("internal_chat_message_metadata_passthrough", {}).get("turn_id") != turn:
             continue
         output = payload.get("output", [])
-        blocks = output if isinstance(output, list) else [{"text": output}]
-        for block in blocks:
-            value = block.get("text", "")
-            try:
-                result = json.loads(value)
-            except (ValueError, TypeError):
-                if denied(str(value)):
-                    raise RuntimeError("Reviewer tool denial; human attention required.")
-                continue
-            if isinstance(result, dict) and (result.get("isError") or denied(json.dumps(result))):
-                raise RuntimeError("Reviewer tool failed; human attention required.")
+        failure = tool_failure(output if isinstance(output, list) else [{"text": output}])
+        if failure:
+            raise RuntimeError(failure)
 
 
 def review(repo, plan, rubric, context=None, session=None, scope=None):
