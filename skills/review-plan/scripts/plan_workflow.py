@@ -75,7 +75,7 @@ def reviewer_command(plan, context, session):
 def review(repo, plan, context, session):
     result = subprocess.run(
         reviewer_command(plan, context, session), cwd=repo,
-        capture_output=True, text=True, timeout=900,
+        capture_output=True, encoding="utf-8", timeout=900,
     )
     if result.returncode:
         raise RuntimeError(f"Claude reviewer exited {result.returncode}; no approval recorded.")
@@ -139,7 +139,7 @@ def approved_response(message, native):
 def native_output(event):
     # Codex 0.154 stores collaboration mode and Plan items in the exact rollout.
     # permission_mode describes permissions, not the collaboration mode.
-    with Path(event["transcript_path"]).open() as stream:
+    with Path(event["transcript_path"]).open(encoding="utf-8") as stream:
         rows = [json.loads(line) for line in stream if line.strip()]
     session, turn = event["session_id"], event["turn_id"]
     repo = Path(event["cwd"]).resolve()

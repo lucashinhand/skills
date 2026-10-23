@@ -51,7 +51,7 @@ def reviewer_command(plan, rubric, scope, context, session):
 def review(repo, plan, rubric, scope, context=None, session=None):
     result = subprocess.run(
         reviewer_command(plan, rubric, scope, context, session), cwd=repo,
-        capture_output=True, text=True, timeout=900,
+        capture_output=True, encoding="utf-8", timeout=900,
     )
     if result.returncode:
         raise RuntimeError(f"Claude reviewer exited {result.returncode}; no approval recorded.")

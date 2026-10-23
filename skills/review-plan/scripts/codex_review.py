@@ -129,7 +129,7 @@ def verify_transcript(session, repo, codex_home):
     paths = list((codex_home / "sessions").glob("**/*-" + session + ".jsonl"))
     if len(paths) != 1:
         raise RuntimeError("Cannot identify the exact Codex reviewer transcript.")
-    rows = [json.loads(line) for line in paths[0].read_text().splitlines() if line.strip()]
+    rows = [json.loads(line) for line in paths[0].read_text(encoding="utf-8").splitlines() if line.strip()]
     metadata = [row["payload"] for row in rows if row.get("type") == "session_meta"]
     contexts = [row["payload"] for row in rows if row.get("type") == "turn_context"]
     if len(metadata) != 1 or metadata[0].get("id") != session or not contexts:
@@ -156,10 +156,10 @@ def review(repo, plan, rubric, context=None, session=None):
     if context:
         prompt += f" Read the author's response at {context} before reassessing."
     args = command(repo, prompt, session)
-    auth = subprocess.run([args[0], "login", "status"], capture_output=True, text=True, timeout=20)
+    auth = subprocess.run([args[0], "login", "status"], capture_output=True, encoding="utf-8", timeout=20)
     if auth.returncode or "Logged in using ChatGPT" not in auth.stdout + auth.stderr:
         raise RuntimeError("Codex ChatGPT subscription login is required.")
-    completed = subprocess.run(args, cwd=repo, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=900)
+    completed = subprocess.run(args, cwd=repo, stdin=subprocess.DEVNULL, capture_output=True, encoding="utf-8", timeout=900)
     if completed.returncode:
         raise RuntimeError(f"Codex reviewer exited {completed.returncode}; no approval recorded.")
     result = parse_events(completed.stdout)
