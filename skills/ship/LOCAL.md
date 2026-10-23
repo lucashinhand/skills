@@ -79,7 +79,9 @@ readiness and current-head dual approval. Do not merge.
 Pass this as one quoted argument to `claude --cloud <prompt>` in a TTY from the
 verified checkout. The skill must already be committed and available to the cloud
 checkout. Save the exact returned session ID with `bind` before monitoring. Do
-not force a model/effort or replace subscription authentication with an API key.
+not pass a model/effort or replace subscription authentication with an API key:
+the cloud session takes the repository's pinned settings defaults, never the
+launching session's interactive model or effort.
 
 The owner must verify the target checkout, fast-forward to the exact current PR
 head, subscribe, initialise its own state and post the handoff-specific readiness
