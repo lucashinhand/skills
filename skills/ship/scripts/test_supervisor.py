@@ -6,7 +6,6 @@ import shutil
 import subprocess
 import tempfile
 import json
-from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("supervisor", Path(__file__).with_name("supervisor.py"))
 module = importlib.util.module_from_spec(spec)
@@ -33,39 +32,6 @@ class SupervisorTests(unittest.TestCase):
                                   cwd=root / "repo", capture_output=True, text=True, check=True)
             self.assertEqual(json.loads(read.stdout), winner)
             self.assertEqual(len(list((root / "skill" / ".state").glob("*/supervisor_442.json"))), 1)
-
-    def test_monitor_backoff_and_startup_deadline(self):
-        with patch.object(module.time, "time", return_value=1000):
-            state = self.begin()
-            delays = []
-            for _ in range(6):
-                state = self.operation(state, "observe", cursor="baseline", work_owed=False)
-                delays.append(state["next_check_seconds"])
-            self.assertEqual(delays, [60, 60, 120, 180, 300, 300])
-        with patch.object(module.time, "time", return_value=1300):
-            state = self.operation(state, "observe", cursor="baseline", work_owed=False)
-            self.assertEqual(state["action"], "reconcile-launch")
-        with patch.object(module.time, "time", return_value=1600):
-            state = self.operation(state, "observe", cursor="baseline", work_owed=False)
-            self.assertEqual(state["status"], "paused")
-
-    def test_recovery_waits_for_send_then_pauses_without_ack(self):
-        with patch.object(module.time, "time", return_value=1000):
-            state = self.operation(self.begin(), "bind", session="session_exact")
-            state = self.operation(state, "ready", session="session_exact")
-            state = self.operation(state, "observe", cursor="commit1", work_owed=True)
-        with patch.object(module.time, "time", return_value=2800):
-            state = self.operation(state, "observe", cursor="commit1", work_owed=True)
-            self.assertEqual(state["action"], "send-recovery-nudge")
-            self.assertIsNone(state["recovery_nudge_sent_at"])
-            state = self.operation(state, "nudged", kind="recovery")
-        with patch.object(module.time, "time", return_value=3100):
-            paused = self.operation(state, "observe", cursor="commit1", work_owed=True)
-            self.assertEqual(paused["status"], "paused")
-            progressed = self.operation(state, "observe", cursor="commit2", work_owed=True)
-            self.assertEqual(progressed["next_check_seconds"], 60)
-            self.assertEqual(progressed["status"], "active")
-            self.assertIsNone(progressed["recovery_nudge_sent_at"])
 
     def begin(self):
         return module.change(None, argparse.Namespace(command="begin", repository="owner/repo",

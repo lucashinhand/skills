@@ -24,7 +24,7 @@ Read the consuming repository's agent instructions and `.claude/github.md` expli
 Selection is capability-based, not environment-based: check whether `mcp__github__subscribe_pr_activity` exists (`ToolSearch` `select:mcp__github__subscribe_pr_activity`).
 
 - **Available** → follow [CLOUD.md](CLOUD.md) — the event-driven review loop (create PR → subscribe → await auto-review → review loop → terminate on Gemini LGTM).
-- **Absent** → follow [LOCAL.md](LOCAL.md) — opposite-CLI implementation review (planned work only) → create PR → automatically launch Claude cloud → supervise liveness → current-head dual approval.
+- **Absent** → follow [LOCAL.md](LOCAL.md) — opposite-CLI implementation review (planned work only) → create PR → automatically launch Claude cloud → hand the session to the human (one check after 30 minutes) → current-head dual approval.
 
 ## Rules Reference
 
