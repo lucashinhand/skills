@@ -5,14 +5,12 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
-import sys
 import uuid
 
-SKILL = Path(__file__).resolve().parent.parent
-# Both skills are installed together; resolve siblings from the physical install.
-sys.path.insert(0, str(SKILL.parent / "review-plan" / "scripts"))
+import claude_review
 import codex_review
-import plan_workflow
+
+SKILL = Path(__file__).resolve().parent.parent
 
 
 def git(repo, *args):
@@ -34,8 +32,8 @@ def assert_checkout(repo, head):
 def transport(reviewer, repo, plan, scope, context, session):
     rubric = SKILL / "SKILL.md"
     if reviewer == "claude":
-        return plan_workflow.review(repo, plan, context, session, rubric=rubric, scope=scope)
-    return codex_review.review(repo, plan, rubric, context=context, session=session, scope=scope)
+        return claude_review.review(repo, plan, rubric, scope, context, session)
+    return codex_review.review(repo, plan, rubric, scope, context, session)
 
 
 def run(repo, plan, base, head, author, context=None, session=None, state_root=None, run_review=transport):

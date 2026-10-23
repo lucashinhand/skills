@@ -1,7 +1,8 @@
 # Local implementation-review runner
 
-Install `review-plan` and `review-impl` together; this skill reuses the former's
-verified CLI transports by physical sibling path. No companion plugin is needed.
+This skill is self-contained. It carries its own Codex and Claude transports,
+duplicated from `review-plan` so either skill installs alone; apply transport
+fixes to both. No companion plugin is needed.
 
 ```sh
 python3 <review-impl>/scripts/review_impl.py --repo <repo> \
