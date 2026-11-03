@@ -114,9 +114,13 @@ def process(event, skill=workflow.SKILL, run_review=review):
         return result
     message = result.get("reason") or result.get("stopReason") or result.get("systemMessage", "Plan review requires attention.")
     # Even LGTM asks the human; a reviewer can never grant tool permission.
-    output = {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+    # The approval dialog hides an ask reason, so every verdict is also shown in
+    # the chat (systemMessage) and handed to the author (additionalContext).
+    output = {"systemMessage": message,
+              "hookSpecificOutput": {"hookEventName": "PreToolUse",
               "permissionDecision": "ask" if approved else "deny",
-              "permissionDecisionReason": message}}
+              "permissionDecisionReason": message,
+              "additionalContext": message}}
     if result.get("continue") is False:
         output.update({"continue": False, "stopReason": message})
     return output

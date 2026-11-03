@@ -26,6 +26,8 @@ response without revising the native plan. Stop resolves the exact plan path
 from this author's transcript and resumes the reviewer. New human decisions
 must be asked rather than invented. Errors/exhaustion pause visibly.
 LGTM asks for human permission at ExitPlanMode; it never approves implementation.
+The approval dialog hides an ask reason, so every verdict is also shown in the
+chat as a `systemMessage` and given to the author as `additionalContext`.
 
 Claude 2.1.263's interactive CLI was verified to create a native plan and supply
 `plan` and, when present, `planFilePath` to PreToolUse without naming/tool-sequence instructions.

@@ -46,9 +46,12 @@ class ClaudePlanTests(unittest.TestCase):
         first = self.run_hook()
         self.assertEqual(first["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertNotIn("plan-slug", first["hookSpecificOutput"]["permissionDecisionReason"])
+        self.assertIn("CHANGES NEEDED", first["systemMessage"])
         self.plan.write_text("# Changed title\nCorrected scope.\n")
         second = self.run_hook({**self.event, "session_id": "another", "tool_use_id": "tool-2"})
         self.assertEqual(second["hookSpecificOutput"]["permissionDecision"], "ask")
+        self.assertIn("pass 2/3: LGTM", second["systemMessage"])
+        self.assertIn("pass 2/3: LGTM", second["hookSpecificOutput"]["additionalContext"])
         self.assertNotEqual(self.calls[0][0], self.calls[1][0])
         self.assertEqual(self.calls[1][2], "codex-reviewer")
 
