@@ -83,6 +83,37 @@ not pass a model/effort or replace subscription authentication with an API key:
 the cloud session takes the repository's pinned settings defaults, never the
 launching session's interactive model or effort.
 
+An agent harness whose shell pipes stdout must allocate a TTY itself, or `--cloud`
+refuses and says it would otherwise run locally. From such a harness:
+
+```sh
+python3 -c 'import os, pty, shutil, sys
+def stdin_read(fd):
+    return os.read(fd, 1024) or b"\x04"
+pty.spawn([shutil.which("claude") or "/opt/homebrew/bin/claude"] + sys.argv[1:], stdin_read=stdin_read)' \
+  --cloud "<prompt>" < /dev/null
+```
+
+Follow-ups take the same wrapper with `-p "<message>" --cloud <recorded-session-id>`.
+Three details are load-bearing, each having silently produced a non-launch:
+
+- `pty.spawn` supplies the TTY. Nothing else here substitutes for it. Prefer it over
+  `script`, whose BSD and util-linux syntaxes differ: `script -q /dev/null <command>`
+  runs on macOS but fails on Linux, which needs `-c`.
+- Call the binary by absolute path. `claude` may be an interactive shell function
+  that a non-interactive shell does not define; a wrapper injecting environment is
+  not needed, because cloud launches authenticate from the subscription, not that
+  environment.
+- `< /dev/null` stops the session waiting on stdin, and bound the run from the
+  harness rather than with `timeout`, which macOS does not ship. The `stdin_read`
+  override is what makes it work: `pty.spawn` drops stdin from its loop at EOF
+  without closing the slave, so a child that reads stdin hangs instead.
+
+A launch that fails before reaching the CLI creates no session, so it is a
+non-launch rather than an ambiguous one, and retrying it is safe. Read the error
+to tell them apart: a missing command or an interactive-terminal refusal never
+reached the CLI, while a timeout or unparsable result may have started a session.
+
 The owner must verify the target checkout, fast-forward to the exact current PR
 head, subscribe, initialise its own state and post the handoff-specific readiness
 comment with its session URL before fixing. A subscription handshake alone is
