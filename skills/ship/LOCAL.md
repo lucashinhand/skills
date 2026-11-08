@@ -58,7 +58,7 @@ confirm it has stopped before replacement. Do not erase records to bypass this.
 
 Mint a fresh handoff ID for this attempt and persist it with the target facts in
 supervisor state before launching. Record launch intent before calling the CLI.
-Use subscription-authenticated `claude --cloud` from a TTY. The short prompt
+Launch with `launch_cloud.py` (below); the CLI authenticates from the subscription. The short prompt
 identifies the installed ship skill, delegated mode, target repository/PR/head,
 handoff ID and authorised fixing scope. Put workflow instructions in the skill,
 not a generated wall of prompt text. Do not use `/autofix-pr` or remote Agent.
@@ -76,43 +76,18 @@ Handoff: <id>. Follow CLOUD.md, including verified checkout, subscription,
 readiness and current-head dual approval. Do not merge.
 ```
 
-Pass this as one quoted argument to `claude --cloud <prompt>` in a TTY from the
-verified checkout. The skill must already be committed and available to the cloud
+Pass this as one quoted argument to `launch_cloud.py` from the verified
+checkout. The skill must already be committed and available to the cloud
 checkout. Save the exact returned session ID with `bind` before handing over. Do
 not pass a model/effort or replace subscription authentication with an API key:
 the cloud session takes the repository's pinned settings defaults, never the
 launching session's interactive model or effort.
 
-An agent harness whose shell pipes stdout must allocate a TTY itself, or `--cloud`
-refuses and says it would otherwise run locally. From such a harness:
-
-```sh
-python3 -c 'import os, pty, shutil, sys
-def stdin_read(fd):
-    return os.read(fd, 1024) or b"\x04"
-pty.spawn([shutil.which("claude") or "/opt/homebrew/bin/claude"] + sys.argv[1:], stdin_read=stdin_read)' \
-  --cloud "<prompt>" < /dev/null
-```
-
-Follow-ups take the same wrapper with `-p "<message>" --cloud <recorded-session-id>`.
-Three details are load-bearing, each having silently produced a non-launch:
-
-- `pty.spawn` supplies the TTY. Nothing else here substitutes for it. Prefer it over
-  `script`, whose BSD and util-linux syntaxes differ: `script -q /dev/null <command>`
-  runs on macOS but fails on Linux, which needs `-c`.
-- Call the binary by absolute path. `claude` may be an interactive shell function
-  that a non-interactive shell does not define; a wrapper injecting environment is
-  not needed, because cloud launches authenticate from the subscription, not that
-  environment.
-- `< /dev/null` stops the session waiting on stdin, and bound the run from the
-  harness rather than with `timeout`, which macOS does not ship. The `stdin_read`
-  override is what makes it work: `pty.spawn` drops stdin from its loop at EOF
-  without closing the slave, so a child that reads stdin hangs instead.
-
-A launch that fails before reaching the CLI creates no session, so it is a
-non-launch rather than an ambiguous one, and retrying it is safe. Read the error
-to tell them apart: a missing command or an interactive-terminal refusal never
-reached the CLI, while a timeout or unparsable result may have started a session.
+Launch with `python3 <physical-skill-directory>/scripts/launch_cloud.py "<prompt>"`
+from the verified checkout. It allocates the terminal Anthropic requires for
+creating a cloud session and prints `{ok, session_id, url}`. `launched: false` is
+a non-launch and safe to retry; `launched: "unknown"` may have started a session,
+so reconcile it and never relaunch. Then `bind` the returned `session_id`.
 
 The owner must verify the target checkout, fast-forward to the exact current PR
 head, subscribe, initialise its own state and post the handoff-specific readiness
@@ -143,7 +118,7 @@ continue to final approval. If the owner has stopped or failed, `pause` with
 the reason and let the human choose between `resume` and `replace`.
 
 Relay explicit human direction to the existing owner with
-`claude -p <message> --cloud <recorded-session-id>`; CLI send acceptance is not
+`claude -p "<message>" --cloud <recorded-session-id> --output-format json` (no TTY needed); CLI send acceptance is not
 proof of receipt. Do not critique or steer every intermediate fix. Final
 objections go to that same owner, who continues fixing. Only the owner pushes,
 replies to review threads and updates review counters. An archived session
