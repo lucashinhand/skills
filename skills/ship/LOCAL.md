@@ -58,7 +58,7 @@ confirm it has stopped before replacement. Do not erase records to bypass this.
 
 Mint a fresh handoff ID for this attempt and persist it with the target facts in
 supervisor state before launching. Record launch intent before calling the CLI.
-Use subscription-authenticated `claude --cloud` from a TTY. The short prompt
+Launch with `launch_cloud.py` (below); the CLI authenticates from the subscription. The short prompt
 identifies the installed ship skill, delegated mode, target repository/PR/head,
 handoff ID and authorised fixing scope. Put workflow instructions in the skill,
 not a generated wall of prompt text. Do not use `/autofix-pr` or remote Agent.
@@ -76,12 +76,18 @@ Handoff: <id>. Follow CLOUD.md, including verified checkout, subscription,
 readiness and current-head dual approval. Do not merge.
 ```
 
-Pass this as one quoted argument to `claude --cloud <prompt>` in a TTY from the
-verified checkout. The skill must already be committed and available to the cloud
+Pass this as one quoted argument to `launch_cloud.py` from the verified
+checkout. The skill must already be committed and available to the cloud
 checkout. Save the exact returned session ID with `bind` before handing over. Do
 not pass a model/effort or replace subscription authentication with an API key:
 the cloud session takes the repository's pinned settings defaults, never the
 launching session's interactive model or effort.
+
+Launch with `python3 <physical-skill-directory>/scripts/launch_cloud.py "<prompt>"`
+from the verified checkout. It allocates the terminal Anthropic requires for
+creating a cloud session and prints `{ok, session_id, url}`. `launched: false` is
+a non-launch and safe to retry; `launched: "unknown"` may have started a session,
+so reconcile it and never relaunch. Then `bind` the returned `session_id`.
 
 The owner must verify the target checkout, fast-forward to the exact current PR
 head, subscribe, initialise its own state and post the handoff-specific readiness
@@ -112,7 +118,7 @@ continue to final approval. If the owner has stopped or failed, `pause` with
 the reason and let the human choose between `resume` and `replace`.
 
 Relay explicit human direction to the existing owner with
-`claude -p <message> --cloud <recorded-session-id>`; CLI send acceptance is not
+`claude -p "<message>" --cloud <recorded-session-id> --output-format json` (no TTY needed); CLI send acceptance is not
 proof of receipt. Do not critique or steer every intermediate fix. Final
 objections go to that same owner, who continues fixing. Only the owner pushes,
 replies to review threads and updates review counters. An archived session
