@@ -28,14 +28,14 @@ test("pushes only the current agent branch, without tags or configured refspecs"
   git("-C", local, "tag", "-a", "fixture", "-m", "must stay local");
   const push = (...args) => spawnSync("bash", [helper, ...args], { cwd: local, encoding: "utf8" });
   assert.notEqual(push().status, 0);
-  for (const branch of ["claude/test", "codex/test"]) {
+  for (const branch of ["claude/test", "codex/test", "dream/test"]) {
     git("-C", local, "checkout", "-b", branch);
     assert.notEqual(push("--force").status, 0);
     const result = push();
     assert.equal(result.status, 0, result.stderr);
   }
   assert.equal(git("--git-dir", remote, "for-each-ref", "--format=%(refname)"),
-    "refs/heads/claude/test\nrefs/heads/codex/test");
+    "refs/heads/claude/test\nrefs/heads/codex/test\nrefs/heads/dream/test");
   git("-C", local, "checkout", "--detach");
   assert.notEqual(push().status, 0);
 });
