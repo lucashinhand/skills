@@ -90,7 +90,7 @@ def command(repo, prompt, session=None):
     if os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN"):
         servers = '{github = {url = "https://api.githubcopilot.com/mcp/", bearer_token_env_var = "GITHUB_PERSONAL_ACCESS_TOKEN", enabled_tools = ' + json.dumps(READ_TOOLS) + '}}'
     args = [binary, "-a", "never", "exec", "-C", str(repo), "-s", "read-only",
-            "-m", "gpt-6-astra", "-c", 'model_reasoning_effort="medium"',
+            "-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="max"',
             "-c", 'model_provider="openai"', "--ignore-user-config",
             "--disable", "hooks", "--disable", "apps", "--disable", "plugins",
             "-c", "mcp_servers=" + servers]
