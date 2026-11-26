@@ -14,7 +14,7 @@ spec.loader.exec_module(module)
 
 class SupervisorTests(unittest.TestCase):
     def test_cli_serialises_duplicate_launches_without_overwriting_record(self):
-        with tempfile.TemporaryDirectory(prefix="ship-supervisor-") as directory:
+        with tempfile.TemporaryDirectory(prefix="tugboat-supervisor-") as directory:
             root = Path(directory)
             scripts = root / "skill" / "scripts"
             scripts.mkdir(parents=True)

@@ -7,7 +7,7 @@ const test = require('node:test');
 
 for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
   test(`${signal} releases the owned lock and preserves review state`, async t => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ship-signal-'));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tugboat-signal-'));
     t.after(() => fs.rmSync(root, {recursive:true, force:true}));
     const scripts = path.join(root, 'skill', 'scripts');
     fs.mkdirSync(scripts, {recursive:true});

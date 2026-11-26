@@ -1,4 +1,4 @@
-# Ship — Local Flow
+# Tugboat — Local Flow
 
 For Codex or Claude CLI without native PR activity subscriptions. Claude cloud
 owns fixes and review-thread writes; the local implementer hands the session to
@@ -59,7 +59,7 @@ confirm it has stopped before replacement. Do not erase records to bypass this.
 Mint a fresh handoff ID for this attempt and persist it with the target facts in
 supervisor state before launching. Record launch intent before calling the CLI.
 Launch with `launch_cloud.py` (below); the CLI authenticates from the subscription. The short prompt
-identifies the installed ship skill, delegated mode, target repository/PR/head,
+identifies the installed tugboat skill, delegated mode, target repository/PR/head,
 handoff ID and authorised fixing scope. Put workflow instructions in the skill,
 not a generated wall of prompt text. Do not use `/autofix-pr` or remote Agent.
 
@@ -70,7 +70,7 @@ Never launch a second potential owner because a readiness comment is missing.
 The launch prompt is only a dispatch envelope; for example:
 
 ```text
-Use the installed ship skill in delegated cloud mode. Fix and shepherd the
+Use the installed tugboat skill in delegated cloud mode. Fix and shepherd the
 existing PR <owner/repo>#<number> on <branch>, expected head <full-sha>.
 Handoff: <id>. Follow CLOUD.md, including verified checkout, subscription,
 readiness and current-head dual approval. Do not merge.
@@ -135,8 +135,8 @@ any pending one-shot check. Never delete Claude's native plan or unrelated plan 
 
 ## Installation requirements
 
-Install `ship`, `review-plan` and `review-impl` together for local use. Standalone
-cloud needs only `ship` and the consuming repository's GitHub policy. Before
+Install `tugboat`, `review-plan` and `review-impl` together for local use. Standalone
+cloud needs only `tugboat` and the consuming repository's GitHub policy. Before
 activation, update repository hook/script paths and narrowly scoped permission
 entries to the installed paths, and migrate any active state with verified
 snapshots. Do not install over an active owner. State lives under the physical

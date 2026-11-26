@@ -1,15 +1,15 @@
 ---
-name: ship
-description: Create a GitHub PR, request Gemini Code Assist review, and shepherd through the review loop until LGTM or circuit breaker trips. Use when user says "ship", "create PR", "open PR", after pushing commits, or when auto-triggered by the post-push hook on claude/* branches.
+name: tugboat
+description: "Escorts an agent branch through review to a merge-ready PR, never merging it: opens or reuses the PR as the repository's GitHub bot, runs the cross-model implementation review, hands the PR to one Claude cloud owner, runs the Gemini Code Assist review loop, and finishes on Gemini plus implementer approval bound to the head commit. Use when the user types /tugboat, asks to open or create a PR for agent work, or the post-push hook on claude/* branches asks for it. Not Anthropic's native /ship or /steward."
 ---
 
-# Ship
+# Tugboat
 
-End-to-end PR lifecycle: create, review, approve.
+End-to-end PR lifecycle: create, review, approve. A tug escorts the ship in; the human docks it (merges).
 
 ## Repository bindings
 
-Read the consuming repository's agent instructions and `.claude/github.md` explicitly in both harnesses. The repository supplies its nitpick destination and GitHub policy; do not assume an issue number. Resolve scripts relative to this skill's physical installed directory, never a hard-coded `.claude/skills` path. Use the verified checkout as the working directory.
+Read the consuming repository's agent instructions and `.claude/github.md` explicitly in both harnesses. The repository supplies its nitpick destination and GitHub policy; do not assume an issue number. Resolve scripts relative to this skill's physical installed directory, never a hard-coded `.claude/skills` path: `<physical-skill-directory>` in the linked files means `${CLAUDE_SKILL_DIR}` (in Codex, the directory containing this SKILL.md). Use the verified checkout as the working directory.
 
 <!-- TODO: revisit repository bindings and permission setup with a setup script. -->
 

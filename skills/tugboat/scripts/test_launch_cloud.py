@@ -18,7 +18,7 @@ print("View: https://claude.ai/code/session_Abc123?from=cli")
 
 class LaunchCloudTests(unittest.TestCase):
     def launch(self, fake=None, *extra):
-        with tempfile.TemporaryDirectory(prefix="ship-launch-") as directory:
+        with tempfile.TemporaryDirectory(prefix="tugboat-launch-") as directory:
             binary = Path(directory) / "claude"
             if fake is not None:
                 binary.write_text(f"#!/usr/bin/env python3\n{fake}")

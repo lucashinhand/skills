@@ -1,4 +1,4 @@
-# Ship — Cloud Flow
+# Tugboat — Cloud Flow
 
 The event-driven review loop, for sessions where `mcp__github__subscribe_pr_activity` is available. Flow selection happens in [SKILL.md](SKILL.md).
 
@@ -63,7 +63,7 @@ schema with `bash <physical-skill-directory>/scripts/pr-state-cli.sh restore
 existing state. It preserves a tripped breaker; only explicit human bypass
 permits `reset-root`. Do not initialise an empty state file before restoration.
 
-Applies **only** when your launch prompt says you are a delegated ship review session for a local implementer session. Everything above holds, with these overrides:
+Applies **only** when your launch prompt says you are a delegated tugboat review session for a local implementer session. Everything above holds, with these overrides:
 
 - **Checkout first:** verify repository origin, open PR, target branch and current full head SHA through GitHub MCP. Require a clean tree. Fetch the exact existing PR branch and check it out at that head using only non-destructive checkout and fast-forward operations. A provisioned cloud branch is not a push target. If the remote advances, fetch and reassess before editing; never reset, force or discard changes. Before each push recheck repository/branch and ensure the latest remote head is an ancestor of the commit being pushed; reconcile new commits and rerun relevant checks, or pause on conflict. Use the repository-allowlisted guarded push helper from the verified checkout root; do not assume `CLAUDE_PROJECT_DIR` is exported. Protected configuration edits may require human approval; never bypass that boundary.
 - **Startup:** the PR already exists — skip Phase 1 steps 1–2. Subscribe (1.3) and initialise or resume owner state without resetting existing counters (1.4). A replacement owner must recover prior review counts and thread outcomes before acting, not receive a fresh breaker budget. Then **enumerate existing PR state** (`pull_request_read`, review threads, comments) rather than only waiting for events — Gemini's auto-review may have landed before you launched.

@@ -7,7 +7,7 @@ const test = require('node:test');
 const source = path.join(__dirname, 'pr-state-cli.sh');
 
 test('physical skill state isolates repositories and preserves counters and thread transitions', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ship-state-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tugboat-state-'));
   t.after(() => fs.rmSync(root, {recursive:true, force:true}));
   const scripts = path.join(root, 'skill', 'scripts');
   fs.mkdirSync(scripts, {recursive:true});
