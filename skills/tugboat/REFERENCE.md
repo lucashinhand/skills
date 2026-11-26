@@ -1,10 +1,10 @@
-# Ship — Reference
+# Tugboat — Reference
 
-Detailed templates and response-handling logic for the /ship workflow. [SKILL.md](SKILL.md) selects the flow, [CLOUD.md](CLOUD.md) / [LOCAL.md](LOCAL.md) are the orchestration; this file provides the formats and rules for each step.
+Detailed templates and response-handling logic for the /tugboat workflow. [SKILL.md](SKILL.md) selects the flow, [CLOUD.md](CLOUD.md) / [LOCAL.md](LOCAL.md) are the orchestration; this file provides the formats and rules for each step.
 
 ## PR Body {#pr-body}
 
-Append these two collapsible blocks verbatim to the end of every PR description created by /ship:
+Append these two collapsible blocks verbatim to the end of every PR description created by /tugboat:
 
 ```markdown
 <details>
